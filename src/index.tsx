@@ -4,8 +4,6 @@ import { PolyKnotDiagramCanvas } from "./renderers/react/poly-knot-diagram-canva
 import { trefoil } from "./core/planar-poly-knot";
 import { transform } from "./core/planar-poly-knot";
 import { dot, translate, scale } from "./utils/lin";
-import { PlanarSpringKnot } from "./core/planar-spring-knot";
-import { drawKnot } from "./renderers/canvas/poly-knot-diagram";
 
 const knot = trefoil();
 const m = dot(translate([200, 200]), scale(100));
@@ -15,22 +13,3 @@ ReactDOM.render(
   <PolyKnotDiagramCanvas knot={knot} width={400} height={400} />,
   document.getElementById("react-root")
 );
-
-const knot2 = trefoil();
-const springKnot = PlanarSpringKnot.fromPlanarKnot(knot2, 1);
-console.log(springKnot);
-springKnot.initialize();
-
-const canvas = document.getElementById("test-canvas") as HTMLCanvasElement;
-const ctx = canvas.getContext("2d");
-
-ctx.strokeStyle = "#000";
-ctx.lineWidth = 5;
-ctx.lineCap = "round";
-
-setInterval(() => {
-  springKnot.tick(0.1);
-
-  ctx.clearRect(0, 0, 400, 400);
-  drawKnot(ctx, springKnot);
-}, 100);
