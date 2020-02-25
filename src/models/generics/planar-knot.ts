@@ -75,18 +75,3 @@ export function map<
 
   return knotFn(knot, crossings, arcs);
 }
-
-export function clone<
-  C,
-  N extends Anchor<C>,
-  R extends Arc<C, N>,
-  K extends Knot<C, N, R>
->(knot: K): K {
-  return map<C, N, R, K>(
-    knot,
-    crossing => ({ ...crossing }),
-    (anchor, crossing) => ({ ...anchor, crossing }),
-    (arc, begin, end) => ({ ...arc, begin, end }),
-    (knot, crossings, arcs) => ({ ...knot, crossings, arcs })
-  );
-}
