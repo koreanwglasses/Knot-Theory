@@ -1,21 +1,16 @@
-import {
-  Anchor,
-  Arc,
-  Knot,
-  CrossingType,
-  AnchorType,
-  ArcType
-} from "./generics/planar-knot";
+import { CrossingType, AnchorType, ArcType } from "./generics/planar-knot";
+import * as D from "./defaults/planar-knot";
+import * as G from "./generics/planar-knot";
 
 export function map<
   C1,
   C2,
-  N1 extends Anchor<C1>,
-  N2 extends Anchor<C2>,
-  R1 extends Arc<C1, N1>,
-  R2 extends Arc<C2, N2>,
-  K1 extends Knot<C1, N1, R1>,
-  K2 extends Knot<C2, N2, R2>
+  N1 extends G.Anchor<C1>,
+  N2 extends G.Anchor<C2>,
+  R1 extends G.Arc<C1, N1>,
+  R2 extends G.Arc<C2, N2>,
+  K1 extends G.Knot<C1, N1, R1>,
+  K2 extends G.Knot<C2, N2, R2>
 >(
   knot: K1,
   crossingFn: (crossing: CrossingType<K1>) => CrossingType<K2>,
@@ -33,12 +28,12 @@ export function map<
 export function map<
   C1,
   C2,
-  N1 extends Anchor<C1>,
-  N2 extends Anchor<C2>,
-  R1 extends Arc<C1, N1>,
-  R2 extends Arc<C2, N2>,
-  K1 extends Knot<C1, N1, R1>,
-  K2 extends Knot<C2, N2, R2>
+  N1 extends G.Anchor<C1>,
+  N2 extends G.Anchor<C2>,
+  R1 extends G.Arc<C1, N1>,
+  R2 extends G.Arc<C2, N2>,
+  K1 extends G.Knot<C1, N1, R1>,
+  K2 extends G.Knot<C2, N2, R2>
 >(
   knot: K1,
   crossingFn: (crossing: C1) => C2,
@@ -65,6 +60,60 @@ export function map<
   return knotFn(knot, crossings, arcs);
 }
 
+export function anchorEquals(anchor1: D.Anchor, anchor2: D.Anchor): boolean {
+  return (
+    anchor1.crossing == anchor2.crossing && anchor1.strand == anchor2.strand
+  );
+}
+
+export function prevArc<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(knot: K, arc: ArcType<K>): ArcType<K>;
+export function prevArc<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(knot: K, arc: R): R {
+  const matches = knot.arcs.filter(prev => anchorEquals(arc.begin, prev.end));
+  if (matches.length == 0) {
+    throw new Error("invalid knot: knot is not a closed, well oriented loop");
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      "invalid knot: knot has branches i.e. is not a simple loop"
+    );
+  }
+  return matches[0];
+}
+
+export function nextArc<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(knot: K, arc: ArcType<K>): ArcType<K>;
+export function nextArc<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(knot: K, arc: R): R {
+  const matches = knot.arcs.filter(next => anchorEquals(arc.end, next.begin));
+  if (matches.length == 0) {
+    throw new Error("invalid knot: knot is not a closed, well oriented loop");
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      "invalid knot: knot has branches i.e. is not a simple loop"
+    );
+  }
+  return matches[0];
+}
+
 /**
  * A crossing with references to anchors
  */
@@ -72,19 +121,19 @@ export class Crossing {
   /**
    * Anchor to the upper strand at this crossing
    */
-  readonly lower: Anchor<this>;
+  readonly lower: G.Anchor<this>;
 
   /**
    * Anchor to the lower strand at this crossing
    */
-  readonly upper: Anchor<this>;
+  readonly upper: G.Anchor<this>;
 
   constructor() {
-    const lower: Anchor<this> = {
+    const lower: G.Anchor<this> = {
       strand: "lower",
       crossing: this
     };
-    const upper: Anchor<this> = {
+    const upper: G.Anchor<this> = {
       strand: "upper",
       crossing: this
     };
