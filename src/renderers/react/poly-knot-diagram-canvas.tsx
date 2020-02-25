@@ -1,16 +1,16 @@
 import * as React from "react";
-import * as PlanarPolygonalKnot from "../../models/generics/planar-polygonal-knot";
-import { drawKnot } from "../canvas/polygonal-knot-diagram";
+import * as PlanarPolyKnot from "../../models/generics/planar-poly-knot";
+import { drawKnot } from "../canvas/poly-knot-diagram";
 
 interface Props {
-  knot: PlanarPolygonalKnot.Knot;
+  knot: PlanarPolyKnot.Knot;
   gap?: number;
 
   width: number;
   height: number;
 }
 
-export class PolygonalKnotDiagramCanvas extends React.Component<Props> {
+export class PolyKnotDiagramCanvas extends React.Component<Props> {
   static defaultProps = {
     gap: 20
   };

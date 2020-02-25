@@ -1,4 +1,4 @@
-import { Knot } from "../../models/generics/planar-polygonal-knot";
+import { Knot } from "../../models/generics/planar-poly-knot";
 import { shiftToward, dist } from "../../core/vector2";
 
 export function drawKnot(
