@@ -1,5 +1,5 @@
 import * as React from "react";
-import * as PlanarPolyKnot from "../../models/generics/planar-poly-knot";
+import * as PlanarPolyKnot from "../../models/interfaces/planar-poly-knot";
 import { drawKnot } from "../canvas/poly-knot-diagram";
 
 interface Props {
