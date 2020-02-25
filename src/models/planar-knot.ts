@@ -1,5 +1,4 @@
 import * as PlanarKnotGeneric from "./generics/planar-knot";
-// import { ClonableCrossing, ClonableAnchor, ClonableArc, ClonableKnot } from "../generics/ClonablePlanarKnot";
 
 /**
  * A crossing with references to anchors

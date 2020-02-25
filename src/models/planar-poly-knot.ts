@@ -1,22 +1,22 @@
-import * as PlanarPolyKnotGeneric from "./generics/planar-poly-knot";
+import * as PlanarPolyKnotInterfaces from "./interfaces/planar-poly-knot";
 import * as PlanarKnot from "./planar-knot";
 import { Vector2 } from "../core/lin";
 
 export class Crossing extends PlanarKnot.Crossing
-  implements PlanarPolyKnotGeneric.Crossing {
-  constructor(readonly location: Vector2) {
+  implements PlanarPolyKnotInterfaces.Crossing {
+  constructor(public location: Vector2) {
     super();
   }
 }
 
-export const trefoil = (): PlanarPolyKnotGeneric.Knot => {
+export const trefoil = (): PlanarPolyKnotInterfaces.Knot => {
   const crossings: Crossing[] = [
     new Crossing([0, 1]),
     new Crossing([-Math.sqrt(3) / 2, -1 / 2]),
     new Crossing([Math.sqrt(3) / 2, -1 / 2])
   ];
 
-  const arcs: PlanarPolyKnotGeneric.Arc[] = [
+  const arcs: PlanarPolyKnotInterfaces.Arc[] = [
     {
       begin: crossings[0].lower,
       end: crossings[1].upper,
