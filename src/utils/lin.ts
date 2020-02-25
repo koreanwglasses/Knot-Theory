@@ -37,6 +37,10 @@ export function shiftToward(v: Vector2, target: Vector2, r: number): Vector2 {
   return add(v, scl(r, normalize(sub(target, v))));
 }
 
+export function lerp(a: Vector2, b: Vector2, t: number): Vector2 {
+  return add(scl(1 - t, a), scl(t, b));
+}
+
 export interface Matrix3 {
   m11: number;
   m12: number;

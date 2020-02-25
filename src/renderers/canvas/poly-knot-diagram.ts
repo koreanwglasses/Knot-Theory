@@ -1,5 +1,6 @@
 import { Knot } from "../../core/defaults/planar-poly-knot";
 import { shiftToward, dist } from "../../utils/lin";
+import { quadraticBSpline } from "./utils";
 
 export function drawKnot(
   ctx: CanvasRenderingContext2D,

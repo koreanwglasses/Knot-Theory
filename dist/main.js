@@ -274,10 +274,20 @@ const poly_knot_diagram_canvas_1 = __webpack_require__(/*! ./renderers/react/pol
 const planar_poly_knot_1 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
 const planar_poly_knot_2 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
 const lin_1 = __webpack_require__(/*! ./utils/lin */ "./src/utils/lin.ts");
+const utils_1 = __webpack_require__(/*! ./renderers/canvas/utils */ "./src/renderers/canvas/utils.ts");
 const knot = planar_poly_knot_1.trefoil();
 const m = lin_1.dot(lin_1.translate([200, 200]), lin_1.scale(100));
 planar_poly_knot_2.transform(knot, m);
 ReactDOM.render(React.createElement(poly_knot_diagram_canvas_1.PolyKnotDiagramCanvas, { knot: knot, width: 400, height: 400 }), document.getElementById("react-root"));
+const canvas = document.getElementById("test-canvas");
+const ctx = canvas.getContext("2d");
+const n = 10;
+const path = new Array(n).fill(null).map((value, i) => {
+    const t = (400 * i) / n;
+    return [200 + 100 * Math.cos(t / 50), 200 + 100 * Math.sin(t / 50)];
+});
+utils_1.quadraticBSpline(ctx, path);
+ctx.stroke();
 
 
 /***/ }),
@@ -293,6 +303,7 @@ ReactDOM.render(React.createElement(poly_knot_diagram_canvas_1.PolyKnotDiagramCa
 
 Object.defineProperty(exports, "__esModule", { value: true });
 const lin_1 = __webpack_require__(/*! ../../utils/lin */ "./src/utils/lin.ts");
+const utils_1 = __webpack_require__(/*! ./utils */ "./src/renderers/canvas/utils.ts");
 function drawKnot(ctx, knot, opts) {
     const { gap } = Object.assign({ gap: 20 }, (opts || {}));
     knot.arcs.forEach(arc => {
@@ -313,13 +324,62 @@ function drawKnot(ctx, knot, opts) {
             ? lin_1.shiftToward(fullPath[fullPath.length - 1], fullPath[fullPath.length - 2], gap)
             : fullPath[fullPath.length - 1];
         ctx.beginPath();
-        ctx.moveTo(...startPoint);
-        fullPath.slice(1, -1).forEach(v => ctx.lineTo(...v));
-        ctx.lineTo(...endPoint);
+        utils_1.quadraticBSpline(ctx, [startPoint, ...fullPath.slice(1, -1), endPoint]);
+        // ctx.moveTo(...startPoint);
+        // fullPath.slice(1, -1).forEach(v => ctx.lineTo(...v));
+        // ctx.lineTo(...endPoint);
         ctx.stroke();
     });
 }
 exports.drawKnot = drawKnot;
+
+
+/***/ }),
+
+/***/ "./src/renderers/canvas/utils.ts":
+/*!***************************************!*\
+  !*** ./src/renderers/canvas/utils.ts ***!
+  \***************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+const lin_1 = __webpack_require__(/*! ../../utils/lin */ "./src/utils/lin.ts");
+function quadraticSegment(ctx, p1, p2, p3) {
+    ctx.moveTo(...p1);
+    ctx.quadraticCurveTo(p2[0], p2[1], p3[0], p3[1]);
+}
+exports.quadraticSegment = quadraticSegment;
+function quadraticBSplineSegment(ctx, p1, p2, p3, p4, p5) {
+    const q1 = lin_1.lerp(p1, p2, 0.5);
+    const q2 = lin_1.lerp(p2, p3, 0.5);
+    const q3 = lin_1.lerp(p3, p4, 0.5);
+    const q4 = lin_1.lerp(p4, p5, 0.5);
+    const r1 = lin_1.lerp(q1, q2, 0.5);
+    const r2 = lin_1.lerp(q2, q3, 0.5);
+    const r3 = lin_1.lerp(q3, q4, 0.5);
+    const s1 = lin_1.lerp(r1, r2, 0.5);
+    const s2 = lin_1.lerp(r2, r3, 0.5);
+    quadraticSegment(ctx, s1, r2, s2);
+}
+exports.quadraticBSplineSegment = quadraticBSplineSegment;
+function quadraticBSpline(ctx, path) {
+    const augPath = [
+        path[0],
+        path[0],
+        path[0],
+        ...path,
+        path[path.length - 1],
+        path[path.length - 1],
+        path[path.length - 1]
+    ];
+    for (let i = 0; i + 4 < augPath.length; i++) {
+        quadraticBSplineSegment(ctx, augPath[i], augPath[i + 1], augPath[i + 2], augPath[i + 3], augPath[i + 4]);
+    }
+}
+exports.quadraticBSpline = quadraticBSpline;
 
 
 /***/ }),
@@ -407,6 +467,10 @@ function shiftToward(v, target, r) {
     return add(v, scl(r, normalize(sub(target, v))));
 }
 exports.shiftToward = shiftToward;
+function lerp(a, b, t) {
+    return add(scl(1 - t, a), scl(t, b));
+}
+exports.lerp = lerp;
 function matrix(array) {
     return {
         m11: array[0][0],
