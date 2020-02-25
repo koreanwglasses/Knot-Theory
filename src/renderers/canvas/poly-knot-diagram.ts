@@ -1,5 +1,5 @@
 import { Knot } from "../../models/generics/planar-poly-knot";
-import { shiftToward, dist } from "../../core/vector2";
+import { shiftToward, dist } from "../../core/lin";
 
 export function drawKnot(
   ctx: CanvasRenderingContext2D,

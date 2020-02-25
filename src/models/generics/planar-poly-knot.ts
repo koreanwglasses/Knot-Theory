@@ -1,6 +1,5 @@
 import * as PlanarKnot from "./planar-knot";
-import { Vector2 } from "../../core/vector2";
-import { Matrix3, dot } from "../../core/matrix3";
+import { Vector2, dot, Matrix3 } from "../../core/lin";
 
 export type Anchor = PlanarKnot.Anchor<Crossing>;
 

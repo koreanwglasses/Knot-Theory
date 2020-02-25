@@ -1,6 +1,6 @@
 import * as PlanarPolyKnotGeneric from "./generics/planar-poly-knot";
 import * as PlanarKnot from "./planar-knot";
-import { Vector2 } from "../core/vector2";
+import { Vector2 } from "../core/lin";
 
 export class Crossing extends PlanarKnot.Crossing
   implements PlanarPolyKnotGeneric.Crossing {
