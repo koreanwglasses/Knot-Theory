@@ -1,9 +1,9 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import { PolyKnotDiagramCanvas } from "./renderers/react/poly-knot-diagram-canvas";
-import { trefoil } from "./models/planar-poly-knot";
-import { transform } from "./models/interfaces/planar-poly-knot";
-import { dot, translate, scale } from "./core/lin";
+import { trefoil } from "./core/planar-poly-knot";
+import { transform } from "./core/planar-poly-knot";
+import { dot, translate, scale } from "./utils/lin";
 
 const knot = trefoil();
 const m = dot(translate([200, 200]), scale(100));

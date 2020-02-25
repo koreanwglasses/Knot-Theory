@@ -1,30 +1,12 @@
-export interface Anchor<C> {
-  crossing: C;
-  strand: "lower" | "upper";
-}
+import {
+  Anchor,
+  Arc,
+  Knot,
+  CrossingType,
+  AnchorType,
+  ArcType
+} from "./generics/planar-knot";
 
-export interface Arc<C, N extends Anchor<C>> {
-  begin: N;
-  end: N;
-}
-
-export interface Knot<C, N extends Anchor<C>, R extends Arc<C, N>> {
-  crossings: C[];
-  arcs: R[];
-}
-
-export function map<
-  C,
-  N extends Anchor<C>,
-  R extends Arc<C, N>,
-  K extends Knot<C, N, R>
->(
-  knot: K,
-  crossingFn: (crossing: C) => C,
-  anchorFn: (anchor: N, crossing: C) => N,
-  arcFc: (arc: R, begin: N, end: N) => R,
-  knotFn: (knot: K, crossing: C[], arcs: R[]) => K
-): K;
 export function map<
   C1,
   C2,
@@ -36,10 +18,17 @@ export function map<
   K2 extends Knot<C2, N2, R2>
 >(
   knot: K1,
-  crossingFn: (crossing: C1) => C2,
-  anchorFn: (anchor: N1, crossing: C2) => N2,
-  arcFn: (arc: R1, begin: N2, end: N2) => R2,
-  knotFn: (knot: K1, crossings: C2[], arcs: R2[]) => K2
+  crossingFn: (crossing: CrossingType<K1>) => CrossingType<K2>,
+  anchorFn: (
+    anchor: AnchorType<K1>,
+    crossing: CrossingType<K2>
+  ) => AnchorType<K2>,
+  arcFn: (
+    arc: ArcType<K1>,
+    begin: AnchorType<K2>,
+    end: AnchorType<K2>
+  ) => ArcType<K2>,
+  knotFn: (knot: K1, crossings: CrossingType<K2>[], arcs: ArcType<K2>[]) => K2
 ): K2;
 export function map<
   C1,
@@ -74,4 +63,32 @@ export function map<
   );
 
   return knotFn(knot, crossings, arcs);
+}
+
+/**
+ * A crossing with references to anchors
+ */
+export class Crossing {
+  /**
+   * Anchor to the upper strand at this crossing
+   */
+  readonly lower: Anchor<this>;
+
+  /**
+   * Anchor to the lower strand at this crossing
+   */
+  readonly upper: Anchor<this>;
+
+  constructor() {
+    const lower: Anchor<this> = {
+      strand: "lower",
+      crossing: this
+    };
+    const upper: Anchor<this> = {
+      strand: "upper",
+      crossing: this
+    };
+    this.lower = lower;
+    this.upper = upper;
+  }
 }
