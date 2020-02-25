@@ -66,6 +66,76 @@ export function anchorEquals(anchor1: D.Anchor, anchor2: D.Anchor): boolean {
   );
 }
 
+/**
+ * Returns arcs in the order [upper-out, upper-in, lower-out, lower in]
+ * @param knot Knot
+ * @param crossing Crossing within the knot
+ */
+export function arcsAtCrossing<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(knot: K, crossing: CrossingType<K>): ArcType<K>[];
+export function arcsAtCrossing<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(knot: K, crossing: CrossingType<K>): R[] {
+  const adjacentArcs = knot.arcs.filter(
+    arc => arc.end.crossing == crossing || arc.begin.crossing == crossing
+  );
+
+  if (adjacentArcs.length != 4) {
+    throw new Error(
+      "invalid knot: each crossing must have exactly four arcs connected to it"
+    );
+  }
+
+  const upperOut = adjacentArcs.filter(
+    arc => arc.begin.strand == "upper" && arc.begin.crossing == crossing
+  );
+  if (upperOut.length == 0) {
+    throw new Error("invalid knot: no upper-out arc at crossing");
+  }
+  if (upperOut.length > 1) {
+    throw new Error("invalid knot: multiple upper-out arcs at crossing");
+  }
+
+  const upperIn = adjacentArcs.filter(
+    arc => arc.end.strand == "upper" && arc.end.crossing == crossing
+  );
+  if (upperIn.length == 0) {
+    throw new Error("invalid knot: no upper-in arc at crossing");
+  }
+  if (upperIn.length > 1) {
+    throw new Error("invalid knot: multiple upper-in arcs at crossing");
+  }
+
+  const lowerOut = adjacentArcs.filter(
+    arc => arc.begin.strand == "lower" && arc.begin.crossing == crossing
+  );
+  if (lowerOut.length == 0) {
+    throw new Error("invalid knot: no lower-out arc at crossing");
+  }
+  if (lowerOut.length > 1) {
+    throw new Error("invalid knot: multiple lower-out arcs at crossing");
+  }
+
+  const lowerIn = adjacentArcs.filter(
+    arc => arc.end.strand == "lower" && arc.end.crossing == crossing
+  );
+  if (lowerIn.length == 0) {
+    throw new Error("invalid knot: no lower-in arc at crossing");
+  }
+  if (lowerIn.length > 1) {
+    throw new Error("invalid knot: multiple lower-in arcs at crossing");
+  }
+
+  return [upperOut[0], upperIn[0], lowerOut[0], lowerIn[0]];
+}
+
 export function prevArc<
   C,
   N extends G.Anchor<C>,

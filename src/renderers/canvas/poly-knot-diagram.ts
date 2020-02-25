@@ -4,9 +4,9 @@ import { shiftToward, dist } from "../../utils/lin";
 export function drawKnot(
   ctx: CanvasRenderingContext2D,
   knot: Knot,
-  opts: { gap?: number }
+  opts?: { gap?: number }
 ): void {
-  const { gap } = { gap: 20, ...opts };
+  const { gap } = { gap: 20, ...(opts || {}) };
 
   knot.arcs.forEach(arc => {
     const fullPath = [

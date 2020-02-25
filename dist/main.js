@@ -116,6 +116,42 @@ function anchorEquals(anchor1, anchor2) {
     return (anchor1.crossing == anchor2.crossing && anchor1.strand == anchor2.strand);
 }
 exports.anchorEquals = anchorEquals;
+function arcsAtCrossing(knot, crossing) {
+    const adjacentArcs = knot.arcs.filter(arc => arc.end.crossing == crossing || arc.begin.crossing == crossing);
+    if (adjacentArcs.length != 4) {
+        throw new Error("invalid knot: each crossing must have exactly four arcs connected to it");
+    }
+    const upperOut = adjacentArcs.filter(arc => arc.begin.strand == "upper" && arc.begin.crossing == crossing);
+    if (upperOut.length == 0) {
+        throw new Error("invalid knot: no upper-out arc at crossing");
+    }
+    if (upperOut.length > 1) {
+        throw new Error("invalid knot: multiple upper-out arcs at crossing");
+    }
+    const upperIn = adjacentArcs.filter(arc => arc.end.strand == "upper" && arc.end.crossing == crossing);
+    if (upperIn.length == 0) {
+        throw new Error("invalid knot: no upper-in arc at crossing");
+    }
+    if (upperIn.length > 1) {
+        throw new Error("invalid knot: multiple upper-in arcs at crossing");
+    }
+    const lowerOut = adjacentArcs.filter(arc => arc.begin.strand == "lower" && arc.begin.crossing == crossing);
+    if (lowerOut.length == 0) {
+        throw new Error("invalid knot: no lower-out arc at crossing");
+    }
+    if (lowerOut.length > 1) {
+        throw new Error("invalid knot: multiple lower-out arcs at crossing");
+    }
+    const lowerIn = adjacentArcs.filter(arc => arc.end.strand == "lower" && arc.end.crossing == crossing);
+    if (lowerIn.length == 0) {
+        throw new Error("invalid knot: no lower-in arc at crossing");
+    }
+    if (lowerIn.length > 1) {
+        throw new Error("invalid knot: multiple lower-in arcs at crossing");
+    }
+    return [upperOut[0], upperIn[0], lowerOut[0], lowerIn[0]];
+}
+exports.arcsAtCrossing = arcsAtCrossing;
 function prevArc(knot, arc) {
     const matches = knot.arcs.filter(prev => anchorEquals(arc.begin, prev.end));
     if (matches.length == 0) {
@@ -232,6 +268,7 @@ exports.trefoil = () => {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", { value: true });
+const lin_1 = __webpack_require__(/*! ../utils/lin */ "./src/utils/lin.ts");
 const planar_knot_1 = __webpack_require__(/*! ./planar-knot */ "./src/core/planar-knot.ts");
 const utils_1 = __webpack_require__(/*! ../utils/utils */ "./src/utils/utils.ts");
 class Node {
@@ -239,11 +276,34 @@ class Node {
         this.parent = parent;
         this.location = [0, 0];
         this.springs = [];
+        this.force = [0, 0];
+        this.repellants = [];
+        this.velocity = [0, 0];
+    }
+    computeForce() {
+        this.force = [0, 0];
+        this.springs.forEach(spring => {
+            // f = k(|d|-l)(d/|d|)
+            const d = lin_1.sub(spring.target.location, this.location);
+            const f = lin_1.scl(spring.k * (lin_1.norm(d) - spring.restLength), lin_1.normalize(d));
+            this.force = lin_1.add(this.force, f);
+        });
+        this.repellants.forEach(node => {
+            // f = kd/|d|^3
+            const d = lin_1.sub(node.location, this.location);
+            const f = lin_1.scl(-1000 / Math.pow(lin_1.norm(d), 3), d);
+            this.force = lin_1.add(this.force, f);
+        });
+    }
+    tick(dt) {
+        const f = lin_1.add(this.force, lin_1.scl(-1, this.velocity));
+        this.velocity = lin_1.add(this.velocity, lin_1.scl(dt, f));
+        this.location = lin_1.add(this.location, lin_1.scl(dt, this.velocity));
     }
 }
 class Spring {
-    constructor(neighbor, restLength, k) {
-        this.neighbor = neighbor;
+    constructor(target, restLength, k) {
+        this.target = target;
         this.restLength = restLength;
         this.k = k;
     }
@@ -288,43 +348,88 @@ function getSegment(knot, arc) {
         next[0]
     ];
 }
+/**
+ * Connect springs between the appropriate nodes
+ * @param knot
+ * @param nodes
+ */
+function createSprings(knot, nodes) {
+    const restLength = 50;
+    const structuralK = 1;
+    const flexionK = 2;
+    const shearK = 3;
+    nodes.forEach(node => {
+        if (node.parent instanceof Arc) {
+            const segment = getSegment(knot, node.parent);
+            const i = segment.indexOf(node);
+            utils_1.assert(2 <= i && i <= segment.length - 3);
+            // Connect structural springs
+            node.springs.push(new Spring(segment[i - 1], restLength, structuralK));
+            node.springs.push(new Spring(segment[i + 1], restLength, structuralK));
+            // connect back from crossing nodes
+            if (i == 2) {
+                segment[1].springs.push(new Spring(node, restLength, structuralK));
+            }
+            else if (i == segment.length - 3) {
+                segment[segment.length - 2].springs.push(new Spring(node, restLength, structuralK));
+            }
+            // Connect flexion springs
+            node.springs.push(new Spring(segment[i - 2], 2 * restLength, flexionK));
+            node.springs.push(new Spring(segment[i + 2], 2 * restLength, flexionK));
+            // connect back from crossing nodes
+            if (i == 3) {
+                segment[1].springs.push(new Spring(node, restLength, flexionK));
+            }
+            else if (i == segment.length - 4) {
+                segment[segment.length - 2].springs.push(new Spring(node, restLength, flexionK));
+            }
+        }
+        else {
+            const [upperOut, upperIn, lowerOut, lowerIn] = planar_knot_1.arcsAtCrossing(knot, node.parent);
+            const uon = upperOut.nodes[0];
+            const uin = upperIn.nodes[upperIn.nodes.length - 1];
+            const lon = lowerOut.nodes[0];
+            const lin = lowerIn.nodes[lowerIn.nodes.length - 1];
+            // connect shear springs
+            uon.springs.push(new Spring(lon, Math.SQRT1_2 * restLength, shearK));
+            uon.springs.push(new Spring(lin, Math.SQRT1_2 * restLength, shearK));
+            uin.springs.push(new Spring(lon, Math.SQRT1_2 * restLength, shearK));
+            uin.springs.push(new Spring(lin, Math.SQRT1_2 * restLength, shearK));
+            lon.springs.push(new Spring(uon, Math.SQRT1_2 * restLength, shearK));
+            lon.springs.push(new Spring(uin, Math.SQRT1_2 * restLength, shearK));
+            lin.springs.push(new Spring(uon, Math.SQRT1_2 * restLength, shearK));
+            lin.springs.push(new Spring(uin, Math.SQRT1_2 * restLength, shearK));
+        }
+    });
+}
+function recenter(nodes, center) {
+    let centroid = [0, 0];
+    nodes.forEach(node => (centroid = lin_1.add(centroid, lin_1.scl(1 / nodes.length, node.location))));
+    nodes.forEach(node => (node.location = lin_1.add(lin_1.sub(node.location, centroid), center)));
+}
 class PlanarSpringKnot {
     constructor(crossings, arcs) {
         this.crossings = crossings;
         this.arcs = arcs;
-        this.nodes = crossings.map(crossing => crossing.node);
+        const crossingNodes = crossings.map(crossing => crossing.node);
+        this.nodes = [...crossingNodes];
         arcs.forEach(arc => this.nodes.push(...arc.nodes));
-        // connect springs to each node
-        const restLength = 1;
-        const structuralK = 1;
-        const flexionK = 1;
-        this.nodes.forEach(node => {
-            if (node.parent instanceof Arc) {
-                const segment = getSegment(this, node.parent);
-                const i = segment.indexOf(node);
-                utils_1.assert(2 <= i && i <= segment.length - 3);
-                // Connect structural springs
-                node.springs.push(new Spring(segment[i - 1], restLength, structuralK));
-                node.springs.push(new Spring(segment[i + 1], restLength, structuralK));
-                // connect back from crossing nodes
-                if (i == 2) {
-                    segment[1].springs.push(new Spring(node, restLength, structuralK));
-                }
-                else if (i == segment.length - 3) {
-                    segment[segment.length - 2].springs.push(new Spring(node, restLength, structuralK));
-                }
-                // Connect flexion springs
-                node.springs.push(new Spring(segment[i - 2], 2 * restLength, flexionK));
-                node.springs.push(new Spring(segment[i + 2], 2 * restLength, flexionK));
-                // connect back from crossing nodes
-                if (i == 3) {
-                    segment[1].springs.push(new Spring(node, restLength, flexionK));
-                }
-                else if (i == segment.length - 4) {
-                    segment[segment.length - 2].springs.push(new Spring(node, restLength, flexionK));
-                }
-            }
+        createSprings(this, this.nodes);
+        crossingNodes.forEach(node => {
+            node.repellants = [...crossingNodes];
+            node.repellants.splice(node.repellants.indexOf(node), 1);
         });
+    }
+    /**
+     * Initialize nodes to random locations
+     */
+    initialize() {
+        this.nodes.forEach(node => (node.location = [Math.random() * 400, Math.random() * 400]));
+    }
+    tick(dt) {
+        this.nodes.forEach(node => node.computeForce());
+        this.nodes.forEach(node => node.tick(dt));
+        recenter(this.nodes, [200, 200]);
     }
     static fromPlanarKnot(knot, subdivisions) {
         return planar_knot_1.map(knot, () => new Crossing(), (anchor, crossing) => (Object.assign(Object.assign({}, anchor), { crossing })), (arc, begin, end) => new Arc(begin, end, subdivisions), (knot, crossings, arcs) => new PlanarSpringKnot(crossings, arcs));
@@ -352,13 +457,25 @@ const planar_poly_knot_1 = __webpack_require__(/*! ./core/planar-poly-knot */ ".
 const planar_poly_knot_2 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
 const lin_1 = __webpack_require__(/*! ./utils/lin */ "./src/utils/lin.ts");
 const planar_spring_knot_1 = __webpack_require__(/*! ./core/planar-spring-knot */ "./src/core/planar-spring-knot.ts");
+const poly_knot_diagram_1 = __webpack_require__(/*! ./renderers/canvas/poly-knot-diagram */ "./src/renderers/canvas/poly-knot-diagram.ts");
 const knot = planar_poly_knot_1.trefoil();
 const m = lin_1.dot(lin_1.translate([200, 200]), lin_1.scale(100));
 planar_poly_knot_2.transform(knot, m);
 ReactDOM.render(React.createElement(poly_knot_diagram_canvas_1.PolyKnotDiagramCanvas, { knot: knot, width: 400, height: 400 }), document.getElementById("react-root"));
 const knot2 = planar_poly_knot_1.trefoil();
-const springKnot = planar_spring_knot_1.PlanarSpringKnot.fromPlanarKnot(knot2, 3);
+const springKnot = planar_spring_knot_1.PlanarSpringKnot.fromPlanarKnot(knot2, 1);
 console.log(springKnot);
+springKnot.initialize();
+const canvas = document.getElementById("test-canvas");
+const ctx = canvas.getContext("2d");
+ctx.strokeStyle = "#000";
+ctx.lineWidth = 5;
+ctx.lineCap = "round";
+setInterval(() => {
+    springKnot.tick(0.1);
+    ctx.clearRect(0, 0, 400, 400);
+    poly_knot_diagram_1.drawKnot(ctx, springKnot);
+}, 100);
 
 
 /***/ }),
@@ -375,7 +492,7 @@ console.log(springKnot);
 Object.defineProperty(exports, "__esModule", { value: true });
 const lin_1 = __webpack_require__(/*! ../../utils/lin */ "./src/utils/lin.ts");
 function drawKnot(ctx, knot, opts) {
-    const { gap } = Object.assign({ gap: 20 }, opts);
+    const { gap } = Object.assign({ gap: 20 }, (opts || {}));
     knot.arcs.forEach(arc => {
         const fullPath = [
             arc.begin.crossing.location,
