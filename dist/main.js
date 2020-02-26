@@ -277,8 +277,7 @@ class Node {
         this.location = [0, 0];
         this.springs = [];
         this.force = [0, 0];
-        this.repellants = [];
-        this.velocity = [0, 0];
+        this.states = [];
     }
     computeForce() {
         this.force = [0, 0];
@@ -288,17 +287,37 @@ class Node {
             const f = lin_1.scl(spring.k * (lin_1.norm(d) - spring.restLength), lin_1.normalize(d));
             this.force = lin_1.add(this.force, f);
         });
-        this.repellants.forEach(node => {
-            // f = kd/|d|^3
-            const d = lin_1.sub(node.location, this.location);
-            const f = lin_1.scl(-1000 / Math.pow(lin_1.norm(d), 3), d);
-            this.force = lin_1.add(this.force, f);
-        });
     }
-    tick(dt) {
-        const f = lin_1.add(this.force, lin_1.scl(-1, this.velocity));
-        this.velocity = lin_1.add(this.velocity, lin_1.scl(dt, f));
-        this.location = lin_1.add(this.location, lin_1.scl(dt, this.velocity));
+    // velocity: Vector2 = [0, 0];
+    // tick(dt: number): void {
+    //   const f = add(this.force, scl(-1, this.velocity));
+    //   this.velocity = add(this.velocity, scl(dt, f));
+    //   this.location = add(this.location, scl(dt, this.velocity));
+    // }
+    step(stepSize) {
+        this.location = lin_1.add(this.location, lin_1.scl(stepSize, this.force));
+    }
+    energy() {
+        let energy = 0;
+        this.springs.forEach(spring => {
+            // e = 1/2 k (|d| - l0)^2
+            const d = lin_1.dist(spring.target.location, this.location);
+            energy += 0.5 * spring.k * Math.pow((d - spring.restLength), 2);
+        });
+        return energy;
+    }
+    /**
+     * Used in optimization
+     */
+    pushState() {
+        this.states.push({ location: this.location });
+    }
+    popState() {
+        const { location } = this.states.pop();
+        this.location = location;
+    }
+    discardState() {
+        this.states.pop();
     }
 }
 class Spring {
@@ -354,10 +373,10 @@ function getSegment(knot, arc) {
  * @param nodes
  */
 function createSprings(knot, nodes) {
-    const restLength = 50;
+    const restLength = 25;
     const structuralK = 1;
-    const flexionK = 2;
-    const shearK = 3;
+    const flexionK = 4;
+    const shearK = 4;
     nodes.forEach(node => {
         if (node.parent instanceof Arc) {
             const segment = getSegment(knot, node.parent);
@@ -402,11 +421,6 @@ function createSprings(knot, nodes) {
         }
     });
 }
-function recenter(nodes, center) {
-    let centroid = [0, 0];
-    nodes.forEach(node => (centroid = lin_1.add(centroid, lin_1.scl(1 / nodes.length, node.location))));
-    nodes.forEach(node => (node.location = lin_1.add(lin_1.sub(node.location, centroid), center)));
-}
 class PlanarSpringKnot {
     constructor(crossings, arcs) {
         this.crossings = crossings;
@@ -415,10 +429,6 @@ class PlanarSpringKnot {
         this.nodes = [...crossingNodes];
         arcs.forEach(arc => this.nodes.push(...arc.nodes));
         createSprings(this, this.nodes);
-        crossingNodes.forEach(node => {
-            node.repellants = [...crossingNodes];
-            node.repellants.splice(node.repellants.indexOf(node), 1);
-        });
     }
     /**
      * Initialize nodes to random locations
@@ -426,13 +436,91 @@ class PlanarSpringKnot {
     initialize() {
         this.nodes.forEach(node => (node.location = [Math.random() * 400, Math.random() * 400]));
     }
-    tick(dt) {
+    perturb(amplitude) {
+        const random = () => {
+            let x, y;
+            do {
+                x = 2 * Math.random() - 1;
+                y = 2 * Math.random() - 1;
+            } while (Math.pow(x, 2) + Math.pow(y, 2) > 1);
+            return [x, y];
+        };
+        this.nodes.forEach(node => (node.location = lin_1.add(node.location, lin_1.scl(amplitude, random()))));
+    }
+    recenter(nodes, center) {
+        let centroid = [0, 0];
+        nodes.forEach(node => (centroid = lin_1.add(centroid, lin_1.scl(1 / nodes.length, node.location))));
+        nodes.forEach(node => (node.location = lin_1.add(lin_1.sub(node.location, centroid), center)));
+    }
+    // tick(dt: number): void {
+    //   this.nodes.forEach(node => node.computeForce());
+    //   this.nodes.forEach(node => node.tick(dt));
+    //   recenter(this.nodes, [200, 200]);
+    // }
+    energy() {
+        return this.nodes.map(node => node.energy()).reduce((a, b) => a + b, 0);
+    }
+    step(stepSize) {
         this.nodes.forEach(node => node.computeForce());
-        this.nodes.forEach(node => node.tick(dt));
-        recenter(this.nodes, [200, 200]);
+        this.nodes.forEach(node => node.step(stepSize));
+    }
+    pushState() {
+        this.nodes.forEach(node => node.pushState());
+    }
+    popState() {
+        this.nodes.forEach(node => node.popState());
+    }
+    discardState() {
+        this.nodes.forEach(node => node.discardState());
+    }
+    localOptimize(maxIterations = 1000, minStepSize = 1e-3) {
+        let iterations = 0;
+        let stepSize = 1;
+        while (iterations < maxIterations) {
+            let newEnergy;
+            let energy;
+            do {
+                if (stepSize < minStepSize) {
+                    return;
+                }
+                energy = this.energy();
+                this.pushState();
+                this.step(stepSize);
+                newEnergy = this.energy();
+                if (newEnergy > energy)
+                    this.popState();
+                else
+                    this.discardState();
+                stepSize = stepSize * (newEnergy < energy ? 1.2 : 0.8);
+                iterations++;
+            } while (newEnergy > energy);
+        }
     }
     static fromPlanarKnot(knot, subdivisions) {
         return planar_knot_1.map(knot, () => new Crossing(), (anchor, crossing) => (Object.assign(Object.assign({}, anchor), { crossing })), (arc, begin, end) => new Arc(begin, end, subdivisions), (knot, crossings, arcs) => new PlanarSpringKnot(crossings, arcs));
+    }
+    static fromPlanarPolyKnot(knot, subdivisions) {
+        return planar_knot_1.map(knot, crossing => {
+            const newCrossing = new Crossing();
+            newCrossing.location = crossing.location;
+            return newCrossing;
+        }, (anchor, crossing) => (Object.assign(Object.assign({}, anchor), { crossing })), (arc, begin, end) => {
+            const newArc = new Arc(begin, end, subdivisions * (arc.path.length + 1) - 1);
+            const fullPath = [
+                arc.begin.crossing.location,
+                ...arc.path,
+                arc.end.crossing.location
+            ];
+            // interpolate the nodes along the existing path
+            for (let i = 0; i < fullPath.length - 1; i++) {
+                for (let j = 0; j < subdivisions; j++) {
+                    if (i * subdivisions + j < newArc.nodes.length) {
+                        newArc.nodes[i * subdivisions + j].location = lin_1.lerp(fullPath[i], fullPath[i + 1], (j + 1) / subdivisions);
+                    }
+                }
+            }
+            return newArc;
+        }, (knot, crossings, arcs) => new PlanarSpringKnot(crossings, arcs));
     }
 }
 exports.PlanarSpringKnot = PlanarSpringKnot;
@@ -462,20 +550,52 @@ const knot = planar_poly_knot_1.trefoil();
 const m = lin_1.dot(lin_1.translate([200, 200]), lin_1.scale(100));
 planar_poly_knot_2.transform(knot, m);
 ReactDOM.render(React.createElement(poly_knot_diagram_canvas_1.PolyKnotDiagramCanvas, { knot: knot, width: 400, height: 400 }), document.getElementById("react-root"));
-const knot2 = planar_poly_knot_1.trefoil();
-const springKnot = planar_spring_knot_1.PlanarSpringKnot.fromPlanarKnot(knot2, 1);
+const springKnot = planar_spring_knot_1.PlanarSpringKnot.fromPlanarPolyKnot(knot, 5);
 console.log(springKnot);
-springKnot.initialize();
+// springKnot.initialize();
 const canvas = document.getElementById("test-canvas");
 const ctx = canvas.getContext("2d");
 ctx.strokeStyle = "#000";
 ctx.lineWidth = 5;
 ctx.lineCap = "round";
-setInterval(() => {
-    springKnot.tick(0.1);
-    ctx.clearRect(0, 0, 400, 400);
-    poly_knot_diagram_1.drawKnot(ctx, springKnot);
-}, 100);
+springKnot.localOptimize();
+// drawKnot(ctx, springKnot);
+// const interval = setInterval(() => {
+//   const energy = springKnot.energy();
+//   springKnot.pushState();
+//   springKnot.perturb(10);
+//   springKnot.localOptimize();
+//   const newEnergy = springKnot.energy();
+//   if (newEnergy > energy) springKnot.popState();
+//   else {
+//     springKnot.discardState();
+//     console.log(energy);
+//   }
+//   ctx.clearRect(0, 0, 400, 400);
+//   drawKnot(ctx, springKnot);
+// }, 100);
+const knot2 = springKnot;
+// const knot2 = trefoil();
+// transform(knot2, m);
+// const crossing = knot2.crossings[0];
+// const [upperOut, upperIn, lowerOut, lowerIn] = arcsAtCrossing(knot2, crossing);
+// const arc1: Arc = {
+//   begin: lowerIn.begin,
+//   end: upperOut.end,
+//   path: [...lowerIn.path, crossing.location, ...upperOut.path]
+// };
+// const arc2: Arc = {
+//   begin: upperIn.begin,
+//   end: lowerOut.end,
+//   path: [...upperIn.path, crossing.location, ...lowerOut.path]
+// };
+// knot2.arcs.splice(knot2.arcs.indexOf(upperOut), 1);
+// knot2.arcs.splice(knot2.arcs.indexOf(upperIn), 1);
+// knot2.arcs.splice(knot2.arcs.indexOf(lowerOut), 1);
+// knot2.arcs.splice(knot2.arcs.indexOf(lowerIn), 1);
+// knot2.arcs.push(arc1, arc2);
+// knot2.crossings.splice(knot2.crossings.indexOf(crossing), 1);
+poly_knot_diagram_1.drawKnot(ctx, knot2);
 
 
 /***/ }),
@@ -491,6 +611,7 @@ setInterval(() => {
 
 Object.defineProperty(exports, "__esModule", { value: true });
 const lin_1 = __webpack_require__(/*! ../../utils/lin */ "./src/utils/lin.ts");
+const utils_1 = __webpack_require__(/*! ./utils */ "./src/renderers/canvas/utils.ts");
 function drawKnot(ctx, knot, opts) {
     const { gap } = Object.assign({ gap: 20 }, (opts || {}));
     knot.arcs.forEach(arc => {
@@ -510,14 +631,67 @@ function drawKnot(ctx, knot, opts) {
         const endPoint = arc.end.strand == "lower"
             ? lin_1.shiftToward(fullPath[fullPath.length - 1], fullPath[fullPath.length - 2], gap)
             : fullPath[fullPath.length - 1];
+        const gapPath = [startPoint, ...fullPath.slice(1, -1), endPoint];
         ctx.beginPath();
-        ctx.moveTo(...startPoint);
-        fullPath.slice(1, -1).forEach(v => ctx.lineTo(...v));
-        ctx.lineTo(...endPoint);
+        utils_1.quadraticBSpline(ctx, gapPath);
+        // polyline(ctx, gapPath);
         ctx.stroke();
     });
 }
 exports.drawKnot = drawKnot;
+
+
+/***/ }),
+
+/***/ "./src/renderers/canvas/utils.ts":
+/*!***************************************!*\
+  !*** ./src/renderers/canvas/utils.ts ***!
+  \***************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+const lin_1 = __webpack_require__(/*! ../../utils/lin */ "./src/utils/lin.ts");
+function quadraticSegment(ctx, p1, p2, p3) {
+    ctx.moveTo(...p1);
+    ctx.quadraticCurveTo(p2[0], p2[1], p3[0], p3[1]);
+}
+exports.quadraticSegment = quadraticSegment;
+function quadraticBSplineSegment(ctx, p1, p2, p3, p4, p5) {
+    const q1 = lin_1.lerp(p1, p2, 0.5);
+    const q2 = lin_1.lerp(p2, p3, 0.5);
+    const q3 = lin_1.lerp(p3, p4, 0.5);
+    const q4 = lin_1.lerp(p4, p5, 0.5);
+    const r1 = lin_1.lerp(q1, q2, 0.5);
+    const r2 = lin_1.lerp(q2, q3, 0.5);
+    const r3 = lin_1.lerp(q3, q4, 0.5);
+    const s1 = lin_1.lerp(r1, r2, 0.5);
+    const s2 = lin_1.lerp(r2, r3, 0.5);
+    quadraticSegment(ctx, s1, r2, s2);
+}
+exports.quadraticBSplineSegment = quadraticBSplineSegment;
+function quadraticBSpline(ctx, path) {
+    const augPath = [
+        path[0],
+        path[0],
+        path[0],
+        ...path,
+        path[path.length - 1],
+        path[path.length - 1],
+        path[path.length - 1]
+    ];
+    for (let i = 0; i + 4 < augPath.length; i++) {
+        quadraticBSplineSegment(ctx, augPath[i], augPath[i + 1], augPath[i + 2], augPath[i + 3], augPath[i + 4]);
+    }
+}
+exports.quadraticBSpline = quadraticBSpline;
+function polyline(ctx, path) {
+    ctx.moveTo(...path[0]);
+    path.slice(1).forEach(v => ctx.lineTo(...v));
+}
+exports.polyline = polyline;
 
 
 /***/ }),

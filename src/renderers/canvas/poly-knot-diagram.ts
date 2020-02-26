@@ -1,6 +1,6 @@
 import { Knot } from "../../core/defaults/planar-poly-knot";
 import { shiftToward, dist } from "../../utils/lin";
-import { quadraticBSpline } from "./utils";
+import { quadraticBSpline, polyline } from "./utils";
 
 export function drawKnot(
   ctx: CanvasRenderingContext2D,
@@ -36,10 +36,10 @@ export function drawKnot(
           )
         : fullPath[fullPath.length - 1];
 
+    const gapPath = [startPoint, ...fullPath.slice(1, -1), endPoint];
     ctx.beginPath();
-    ctx.moveTo(...startPoint);
-    fullPath.slice(1, -1).forEach(v => ctx.lineTo(...v));
-    ctx.lineTo(...endPoint);
+    quadraticBSpline(ctx, gapPath);
+    // polyline(ctx, gapPath);
     ctx.stroke();
   });
 }

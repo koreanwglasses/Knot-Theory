@@ -1,7 +1,17 @@
-import * as PlanarKnotDefaults from "./defaults/planar-knot";
-import * as G from "./generics/planar-poly-knot";
-import { Vector2, normalize, sub, scl, add, norm } from "../utils/lin";
-import { map, prevArc, nextArc, arcsAtCrossing } from "./planar-knot";
+import * as G from "../core/generics/planar-poly-knot";
+import * as PlanarKnotDefaults from "../core/defaults/planar-knot";
+import * as PlanarPolyKnotDefaults from "../core/defaults/planar-poly-knot";
+import {
+  Vector2,
+  normalize,
+  sub,
+  scl,
+  add,
+  norm,
+  lerp,
+  dist
+} from "../utils/lin";
+import { map, prevArc, nextArc, arcsAtCrossing } from "../core/planar-knot";
 import { assert } from "../utils/utils";
 
 class Node {
@@ -9,9 +19,9 @@ class Node {
   springs: Spring[] = [];
   force: Vector2 = [0, 0];
 
-  constructor(readonly parent: Crossing | Arc) {}
+  private states: { location: Vector2 }[] = [];
 
-  repellants: Node[] = [];
+  constructor(readonly parent: Crossing | Arc) {}
 
   computeForce(): void {
     this.force = [0, 0];
@@ -21,20 +31,43 @@ class Node {
       const f = scl(spring.k * (norm(d) - spring.restLength), normalize(d));
       this.force = add(this.force, f);
     });
-
-    this.repellants.forEach(node => {
-      // f = kd/|d|^3
-      const d = sub(node.location, this.location);
-      const f = scl(-1000 / norm(d) ** 3, d);
-      this.force = add(this.force, f);
-    });
   }
 
-  velocity: Vector2 = [0, 0];
-  tick(dt: number): void {
-    const f = add(this.force, scl(-1, this.velocity));
-    this.velocity = add(this.velocity, scl(dt, f));
-    this.location = add(this.location, scl(dt, this.velocity));
+  // velocity: Vector2 = [0, 0];
+  // tick(dt: number): void {
+  //   const f = add(this.force, scl(-1, this.velocity));
+  //   this.velocity = add(this.velocity, scl(dt, f));
+  //   this.location = add(this.location, scl(dt, this.velocity));
+  // }
+
+  step(stepSize: number): void {
+    this.location = add(this.location, scl(stepSize, this.force));
+  }
+
+  energy(): number {
+    let energy = 0;
+    this.springs.forEach(spring => {
+      // e = 1/2 k (|d| - l0)^2
+      const d = dist(spring.target.location, this.location);
+      energy += 0.5 * spring.k * (d - spring.restLength) ** 2;
+    });
+    return energy;
+  }
+
+  /**
+   * Used in optimization
+   */
+  pushState(): void {
+    this.states.push({ location: this.location });
+  }
+
+  popState(): void {
+    const { location } = this.states.pop();
+    this.location = location;
+  }
+
+  discardState(): void {
+    this.states.pop();
   }
 }
 
@@ -99,10 +132,10 @@ function getSegment(knot: PlanarSpringKnot, arc: Arc): Node[] {
  * @param nodes
  */
 function createSprings(knot: PlanarSpringKnot, nodes: Node[]): void {
-  const restLength = 50;
+  const restLength = 25;
   const structuralK = 1;
-  const flexionK = 2;
-  const shearK = 3;
+  const flexionK = 4;
+  const shearK = 4;
 
   nodes.forEach(node => {
     if (node.parent instanceof Arc) {
@@ -162,16 +195,6 @@ function createSprings(knot: PlanarSpringKnot, nodes: Node[]): void {
   });
 }
 
-function recenter(nodes: Node[], center: Vector2): void {
-  let centroid: Vector2 = [0, 0];
-  nodes.forEach(
-    node => (centroid = add(centroid, scl(1 / nodes.length, node.location)))
-  );
-  nodes.forEach(
-    node => (node.location = add(sub(node.location, centroid), center))
-  );
-}
-
 export class PlanarSpringKnot implements G.Knot<Crossing, Anchor, Arc> {
   private nodes: Node[];
 
@@ -181,11 +204,6 @@ export class PlanarSpringKnot implements G.Knot<Crossing, Anchor, Arc> {
     arcs.forEach(arc => this.nodes.push(...arc.nodes));
 
     createSprings(this, this.nodes);
-
-    crossingNodes.forEach(node => {
-      node.repellants = [...crossingNodes];
-      node.repellants.splice(node.repellants.indexOf(node), 1);
-    });
   }
 
   /**
@@ -197,10 +215,78 @@ export class PlanarSpringKnot implements G.Knot<Crossing, Anchor, Arc> {
     );
   }
 
-  tick(dt: number): void {
+  perturb(amplitude: number): void {
+    const random = (): Vector2 => {
+      let x, y: number;
+      do {
+        x = 2 * Math.random() - 1;
+        y = 2 * Math.random() - 1;
+      } while (x ** 2 + y ** 2 > 1);
+      return [x, y];
+    };
+    this.nodes.forEach(
+      node => (node.location = add(node.location, scl(amplitude, random())))
+    );
+  }
+
+  recenter(nodes: Node[], center: Vector2): void {
+    let centroid: Vector2 = [0, 0];
+    nodes.forEach(
+      node => (centroid = add(centroid, scl(1 / nodes.length, node.location)))
+    );
+    nodes.forEach(
+      node => (node.location = add(sub(node.location, centroid), center))
+    );
+  }
+
+  // tick(dt: number): void {
+  //   this.nodes.forEach(node => node.computeForce());
+  //   this.nodes.forEach(node => node.tick(dt));
+  //   recenter(this.nodes, [200, 200]);
+  // }
+
+  energy(): number {
+    return this.nodes.map(node => node.energy()).reduce((a, b) => a + b, 0);
+  }
+
+  step(stepSize: number): void {
     this.nodes.forEach(node => node.computeForce());
-    this.nodes.forEach(node => node.tick(dt));
-    recenter(this.nodes, [200, 200]);
+    this.nodes.forEach(node => node.step(stepSize));
+  }
+
+  pushState(): void {
+    this.nodes.forEach(node => node.pushState());
+  }
+  popState(): void {
+    this.nodes.forEach(node => node.popState());
+  }
+  discardState(): void {
+    this.nodes.forEach(node => node.discardState());
+  }
+
+  localOptimize(maxIterations = 1000, minStepSize = 1e-3): void {
+    let iterations = 0;
+    let stepSize = 1;
+    while (iterations < maxIterations) {
+      let newEnergy: number;
+      let energy: number;
+      do {
+        if (stepSize < minStepSize) {
+          return;
+        }
+
+        energy = this.energy();
+        this.pushState();
+        this.step(stepSize);
+        newEnergy = this.energy();
+
+        if (newEnergy > energy) this.popState();
+        else this.discardState();
+
+        stepSize = stepSize * (newEnergy < energy ? 1.2 : 0.8);
+        iterations++;
+      } while (newEnergy > energy);
+    }
   }
 
   static fromPlanarKnot(
@@ -212,6 +298,50 @@ export class PlanarSpringKnot implements G.Knot<Crossing, Anchor, Arc> {
       () => new Crossing(),
       (anchor, crossing) => ({ ...anchor, crossing }),
       (arc, begin, end) => new Arc(begin, end, subdivisions),
+      (knot, crossings, arcs) => new PlanarSpringKnot(crossings, arcs)
+    );
+  }
+
+  static fromPlanarPolyKnot(
+    knot: PlanarPolyKnotDefaults.Knot,
+    subdivisions: number
+  ): PlanarSpringKnot {
+    return map(
+      knot,
+      crossing => {
+        const newCrossing = new Crossing();
+        newCrossing.location = crossing.location;
+        return newCrossing;
+      },
+      (anchor, crossing) => ({ ...anchor, crossing }),
+      (arc, begin, end) => {
+        const newArc = new Arc(
+          begin,
+          end,
+          subdivisions * (arc.path.length + 1) - 1
+        );
+
+        const fullPath = [
+          arc.begin.crossing.location,
+          ...arc.path,
+          arc.end.crossing.location
+        ];
+
+        // interpolate the nodes along the existing path
+        for (let i = 0; i < fullPath.length - 1; i++) {
+          for (let j = 0; j < subdivisions; j++) {
+            if (i * subdivisions + j < newArc.nodes.length) {
+              newArc.nodes[i * subdivisions + j].location = lerp(
+                fullPath[i],
+                fullPath[i + 1],
+                (j + 1) / subdivisions
+              );
+            }
+          }
+        }
+
+        return newArc;
+      },
       (knot, crossings, arcs) => new PlanarSpringKnot(crossings, arcs)
     );
   }

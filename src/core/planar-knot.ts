@@ -184,6 +184,33 @@ export function nextArc<
   return matches[0];
 }
 
+export function unlink<C, N extends G.Anchor<C>, R extends G.Arc<C, N>>(
+  knot: G.Knot<C, N, R>,
+  crossing: C,
+  sign: "positive" | "negative",
+  mergeArcs: (arc1: R, arc2: R) => R
+): void {
+  const [upperOut, upperIn, lowerOut, lowerIn] = arcsAtCrossing(knot, crossing);
+
+  const arc1 =
+    sign == "positive"
+      ? mergeArcs(lowerIn, upperOut)
+      : mergeArcs(lowerIn, upperIn);
+  const arc2 =
+    sign == "positive"
+      ? mergeArcs(upperIn, lowerOut)
+      : mergeArcs(lowerOut, upperIn);
+
+  knot.arcs.splice(knot.arcs.indexOf(upperOut), 1);
+  knot.arcs.splice(knot.arcs.indexOf(upperIn), 1);
+  knot.arcs.splice(knot.arcs.indexOf(lowerOut), 1);
+  knot.arcs.splice(knot.arcs.indexOf(lowerIn), 1);
+
+  knot.arcs.push(arc1, arc2);
+
+  knot.crossings.splice(knot.crossings.indexOf(crossing), 1);
+}
+
 /**
  * A crossing with references to anchors
  */

@@ -58,3 +58,8 @@ export function quadraticBSpline(
     );
   }
 }
+
+export function polyline(ctx: CanvasRenderingContext2D, path: Vector2[]): void {
+  ctx.moveTo(...path[0]);
+  path.slice(1).forEach(v => ctx.lineTo(...v));
+}
