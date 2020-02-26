@@ -455,9 +455,9 @@ const ReactDOM = __webpack_require__(/*! react-dom */ "react-dom");
 const poly_knot_diagram_canvas_1 = __webpack_require__(/*! ./renderers/react/poly-knot-diagram-canvas */ "./src/renderers/react/poly-knot-diagram-canvas.tsx");
 const planar_poly_knot_1 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
 const planar_poly_knot_2 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
-const lin_1 = __webpack_require__(/*! ./utils/lin */ "./src/utils/lin.ts");
 const planar_spring_knot_1 = __webpack_require__(/*! ./core/planar-spring-knot */ "./src/core/planar-spring-knot.ts");
 const poly_knot_diagram_1 = __webpack_require__(/*! ./renderers/canvas/poly-knot-diagram */ "./src/renderers/canvas/poly-knot-diagram.ts");
+const lin_1 = __webpack_require__(/*! ./utils/lin */ "./src/utils/lin.ts");
 const knot = planar_poly_knot_1.trefoil();
 const m = lin_1.dot(lin_1.translate([200, 200]), lin_1.scale(100));
 planar_poly_knot_2.transform(knot, m);
@@ -605,6 +605,10 @@ function shiftToward(v, target, r) {
     return add(v, scl(r, normalize(sub(target, v))));
 }
 exports.shiftToward = shiftToward;
+function lerp(a, b, t) {
+    return add(scl(1 - t, a), scl(t, b));
+}
+exports.lerp = lerp;
 function matrix(array) {
     return {
         m11: array[0][0],
