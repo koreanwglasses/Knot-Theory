@@ -11,24 +11,26 @@ export function drawKnot(
 
   knot.arcs.forEach(arc => {
     const fullPath = [
-      arc.begin.crossing.location,
+      ...(arc.begin ? [arc.begin.crossing.location] : []),
       ...arc.path.filter(
         // filter out points in path that are too close to the endpoints
         v =>
-          (arc.begin.strand == "upper" ||
+          !arc.begin ||
+          !arc.end ||
+          ((arc.begin.strand == "upper" ||
             dist(v, arc.begin.crossing.location) >= gap) &&
-          (arc.end.strand == "upper" ||
-            dist(v, arc.end.crossing.location) >= gap)
+            (arc.end.strand == "upper" ||
+              dist(v, arc.end.crossing.location) >= gap))
       ),
-      arc.end.crossing.location
+      ...(arc.end ? [arc.end.crossing.location] : [])
     ];
 
     const startPoint =
-      arc.begin.strand == "lower"
+      arc.begin && arc.begin.strand == "lower"
         ? shiftToward(fullPath[0], fullPath[1], gap)
         : fullPath[0];
     const endPoint =
-      arc.end.strand == "lower"
+      arc.end && arc.end.strand == "lower"
         ? shiftToward(
             fullPath[fullPath.length - 1],
             fullPath[fullPath.length - 2],
@@ -40,6 +42,7 @@ export function drawKnot(
     ctx.beginPath();
     quadraticBSpline(ctx, gapPath);
     // polyline(ctx, gapPath);
+    // ctx.arc(endPoint[0], endPoint[1], 5, 0, 2 * Math.PI);
     ctx.stroke();
   });
 }

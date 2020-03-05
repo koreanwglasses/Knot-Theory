@@ -74,6 +74,7 @@ export function map<
   const cloneAnchor = ((): ((anchor: N1) => N2) => {
     const anchors: { [key: string]: N2 } = {};
     return (anchor: N1): N2 => {
+      if (anchor == null) return null;
       const i = knot.crossings.indexOf(anchor.crossing);
       const key = `${i},${anchor.strand}`;
       if (!(key in anchors)) anchors[key] = anchorFn(anchor, crossings[i]);
@@ -106,12 +107,14 @@ export function arcsAtCrossing<
   K extends G.Knot<C, N, R>
 >(knot: K, crossing: C): R[] {
   const adjacentArcs = knot.arcs.filter(
-    arc => arc.end.crossing == crossing || arc.begin.crossing == crossing
+    arc =>
+      (arc.end && arc.end.crossing == crossing) ||
+      (arc.begin && arc.begin.crossing == crossing)
   );
 
-  if (adjacentArcs.length != 4) {
+  if (adjacentArcs.length > 4) {
     throw new Error(
-      "invalid knot: each crossing must have exactly four arcs connected to it"
+      "invalid knot: each crossing must have at most four arcs connected to it"
     );
   }
 
@@ -206,6 +209,14 @@ export function nextArc<
   return matches[0];
 }
 
+/**
+ * Convert a crossing to an uncrossing.
+ * orientation consistency: reorient is required.
+ * @param knot Knot to operate on
+ * @param crossing Crossing to uncross
+ * @param sign Which arcs to merge
+ * @param callbackFns Knot mutation strategies
+ */
 export function uncross<
   C,
   N extends G.Anchor<C>,
@@ -217,19 +228,12 @@ export function uncross<
   sign: "positive" | "negative",
   callbackFns: {
     mergeArcs: (arc1: R, arc2: R, crossing: C) => R;
-    copyCrossing: (crossing: C) => C;
-    copyAnchor: (anchor: N, crossing: C) => N;
-    copyArc: (arc: R, begin: N, end: N) => R;
-    copyKnot: (knot: K, crossings: C[], arcs: R[]) => K;
+    addArc: (arc: R) => void;
+    removeArc: (arc: R) => void;
+    removeCrossing: (crossing: C) => void;
   }
-): K {
-  const {
-    mergeArcs,
-    copyCrossing,
-    copyAnchor,
-    copyArc,
-    copyKnot
-  } = callbackFns;
+): void {
+  const { mergeArcs, addArc, removeArc, removeCrossing } = callbackFns;
 
   const [upperOut, upperIn, lowerOut, lowerIn] = arcsAtCrossing(knot, crossing);
 
@@ -242,22 +246,67 @@ export function uncross<
       ? mergeArcs(upperIn, lowerOut, crossing)
       : mergeArcs(upperOut, lowerOut, crossing);
 
-  const arcsToRemove = [upperOut, upperIn, lowerOut, lowerIn];
+  [upperOut, upperIn, lowerOut, lowerIn].forEach(arc => removeArc(arc));
 
-  const newArcs = [
-    ...knot.arcs.filter(arc => arcsToRemove.indexOf(arc) == -1),
-    arc1,
-    arc2
-  ];
-  const newCrossings = knot.crossings.filter(c => c !== crossing);
+  [arc1, arc2].forEach(arc => addArc(arc));
 
-  return map<C, C, N, N, R, R, G.Knot<C, N, R>, K>(
-    { crossings: newCrossings, arcs: newArcs },
-    copyCrossing,
-    copyAnchor,
-    copyArc,
-    (_, crossings, arcs) => copyKnot(knot, crossings, arcs)
-  );
+  removeCrossing(crossing);
+}
+
+export function reorient<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(
+  knot: K,
+  seed: R,
+  callbackFns: {
+    flipArc: (arc: R) => R;
+    addArc: (arc: R) => void;
+    removeArc: (arc: R) => void;
+  }
+): void {
+  const { flipArc, addArc, removeArc } = callbackFns;
+
+  const arcsToRemove: R[] = [];
+  const arcsToAdd: R[] = [];
+
+  let currentArc = seed;
+  let flipped = false;
+  do {
+    if (currentArc.end == null) break;
+
+    const nextArcs = knot.arcs.filter(
+      arc =>
+        arc !== currentArc &&
+        [arc.begin, arc.end].indexOf(
+          flipped ? currentArc.begin : currentArc.end
+        ) != -1
+    );
+    if (nextArcs.length == 0) {
+      throw new Error(
+        "invalid knot: not enough (1) arcs on upper strand of crossing"
+      );
+    }
+    if (nextArcs.length > 1) {
+      throw new Error(
+        "invalid knot: too many (3+) arcs on upper strand of crossing"
+      );
+    }
+    const nextArc = nextArcs[0];
+    if (nextArc.end == (flipped ? currentArc.begin : currentArc.end)) {
+      arcsToRemove.push(nextArc);
+      arcsToAdd.push(flipArc(nextArc));
+      flipped = true;
+    } else {
+      flipped = false;
+    }
+    currentArc = nextArc;
+  } while (currentArc !== seed);
+
+  arcsToRemove.forEach(removeArc);
+  arcsToAdd.forEach(addArc);
 }
 
 export class Anchor implements G.Anchor<Crossing> {
@@ -306,6 +355,10 @@ export class Arc implements G.Arc<Crossing, Anchor> {
 export class Knot implements G.Knot<Crossing, Anchor, Arc> {
   constructor(readonly crossings: Crossing[], readonly arcs: Arc[]) {
     this.mergeArcs = this.mergeArcs.bind(this);
+    this.flipArc = this.flipArc.bind(this);
+    this.removeCrossing = this.removeCrossing.bind(this);
+    this.addArc = this.addArc.bind(this);
+    this.removeArc = this.removeArc.bind(this);
   }
 
   copy(crossings: Crossing[], arcs: Arc[]): Knot {
@@ -323,6 +376,9 @@ export class Knot implements G.Knot<Crossing, Anchor, Arc> {
   }
 
   mergeArcs(arc1: Arc, arc2: Arc, crossing: Crossing): Arc {
+    if (arc1 == arc2) {
+      return new Arc(null, null); // used to denote an unlink component
+    }
     if (arc1.end.crossing == crossing && arc2.begin.crossing == crossing) {
       return new Arc(arc1.begin, arc2.end);
     }
@@ -338,13 +394,29 @@ export class Knot implements G.Knot<Crossing, Anchor, Arc> {
     throw new Error("incompatible arcs");
   }
 
-  uncross(crossing: Crossing, sign: "positive" | "negative"): Knot {
-    return uncross<Crossing, Anchor, Arc, Knot>(this, crossing, sign, {
-      mergeArcs: this.mergeArcs,
-      copyCrossing: crossing => crossing.copy(),
-      copyAnchor: (anchor, crossing) => anchor.copy(crossing),
-      copyArc: (arc, begin, end) => arc.copy(begin, end),
-      copyKnot: (knot, crossings, arcs) => knot.copy(crossings, arcs)
-    });
+  flipArc(arc: Arc): Arc {
+    return new Arc(arc.end, arc.begin);
+  }
+
+  removeCrossing(crossing: Crossing): void {
+    if (this.crossings.indexOf(crossing) != -1)
+      this.crossings.splice(this.crossings.indexOf(crossing), 1);
+  }
+
+  addArc(arc: Arc): void {
+    this.arcs.push(arc);
+  }
+
+  removeArc(arc: Arc): void {
+    if (this.arcs.indexOf(arc) != -1)
+      this.arcs.splice(this.arcs.indexOf(arc), 1);
+  }
+
+  uncross(crossing: Crossing, sign: "positive" | "negative"): void {
+    uncross<Crossing, Anchor, Arc, Knot>(this, crossing, sign, this);
+  }
+
+  reorient(seed?: Arc): void {
+    reorient(this, seed || this.arcs[0], this);
   }
 }

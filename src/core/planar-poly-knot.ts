@@ -61,7 +61,7 @@ export class Arc extends PlanarKnot.Arc implements G.Arc<Crossing, Anchor> {
   }
 
   copy(begin: Anchor, end: Anchor): Arc {
-    return new Arc(begin, end, this.path);
+    return new Arc(begin, end, this.path.slice());
   }
 }
 
@@ -72,27 +72,34 @@ export class Knot extends PlanarKnot.Knot
   }
 
   copy(crossings: Crossing[], arcs: Arc[]): Knot {
-    return super.copy(crossings, arcs) as Knot;
+    return new Knot(crossings, arcs);
+  }
+
+  clone(): Knot {
+    return super.clone() as Knot;
   }
 
   mergeArcs(arc1: Arc, arc2: Arc, crossing: Crossing): Arc {
     const arc3 = super.mergeArcs(arc1, arc2, crossing) as Arc;
 
-    const newPath = [
-      ...(arc1.end.crossing == crossing
-        ? arc1.path
-        : arc1.path.slice().reverse()),
-      crossing.location,
-      ...(arc2.begin.crossing == crossing
-        ? arc2.path
-        : arc2.path.slice().reverse())
-    ];
+    const newPath =
+      arc1 == arc2
+        ? [...arc1.path, crossing.location, arc1.path[0]]
+        : [
+            ...(arc1.end.crossing === crossing
+              ? arc1.path
+              : arc1.path.slice().reverse()),
+            crossing.location,
+            ...(arc2.begin.crossing === crossing
+              ? arc2.path
+              : arc2.path.slice().reverse())
+          ];
 
     return new Arc(arc3.begin, arc3.end, newPath);
   }
 
-  uncross(crossing: Crossing, sign: "positive" | "negative"): Knot {
-    return super.uncross(crossing, sign) as Knot;
+  flipArc(arc: Arc): Arc {
+    return new Arc(arc.end, arc.begin, arc.path.slice().reverse());
   }
 
   static fromPlanarPolyKnot<

@@ -101,6 +101,8 @@ function map(knot, crossingFn, anchorFn, arcFn, knotFn) {
     const cloneAnchor = (() => {
         const anchors = {};
         return (anchor) => {
+            if (anchor == null)
+                return null;
             const i = knot.crossings.indexOf(anchor.crossing);
             const key = `${i},${anchor.strand}`;
             if (!(key in anchors))
@@ -122,9 +124,10 @@ exports.anchorEquals = anchorEquals;
  * @param crossing Crossing within the knot
  */
 function arcsAtCrossing(knot, crossing) {
-    const adjacentArcs = knot.arcs.filter(arc => arc.end.crossing == crossing || arc.begin.crossing == crossing);
-    if (adjacentArcs.length != 4) {
-        throw new Error("invalid knot: each crossing must have exactly four arcs connected to it");
+    const adjacentArcs = knot.arcs.filter(arc => (arc.end && arc.end.crossing == crossing) ||
+        (arc.begin && arc.begin.crossing == crossing));
+    if (adjacentArcs.length > 4) {
+        throw new Error("invalid knot: each crossing must have at most four arcs connected to it");
     }
     const upperOut = adjacentArcs.filter(arc => arc.begin.strand == "upper" && arc.begin.crossing == crossing);
     if (upperOut.length == 0) {
@@ -179,8 +182,16 @@ function nextArc(knot, arc) {
     return matches[0];
 }
 exports.nextArc = nextArc;
-function unlink(knot, crossing, sign, callbackFns) {
-    const { mergeArcs, copyCrossing, copyAnchor, copyArc, copyKnot } = callbackFns;
+/**
+ * Convert a crossing to an uncrossing.
+ * orientation consistency: reorient is required.
+ * @param knot Knot to operate on
+ * @param crossing Crossing to uncross
+ * @param sign Which arcs to merge
+ * @param callbackFns Knot mutation strategies
+ */
+function uncross(knot, crossing, sign, callbackFns) {
+    const { mergeArcs, addArc, removeArc, removeCrossing } = callbackFns;
     const [upperOut, upperIn, lowerOut, lowerIn] = arcsAtCrossing(knot, crossing);
     const arc1 = sign == "positive"
         ? mergeArcs(lowerIn, upperOut, crossing)
@@ -188,16 +199,43 @@ function unlink(knot, crossing, sign, callbackFns) {
     const arc2 = sign == "positive"
         ? mergeArcs(upperIn, lowerOut, crossing)
         : mergeArcs(upperOut, lowerOut, crossing);
-    const arcsToRemove = [upperOut, upperIn, lowerOut, lowerIn];
-    const newArcs = [
-        ...knot.arcs.filter(arc => arcsToRemove.indexOf(arc) == -1),
-        arc1,
-        arc2
-    ];
-    const newCrossings = knot.crossings.filter(c => c !== crossing);
-    return map({ crossings: newCrossings, arcs: newArcs }, copyCrossing, copyAnchor, copyArc, (_, crossings, arcs) => copyKnot(knot, crossings, arcs));
+    [upperOut, upperIn, lowerOut, lowerIn].forEach(arc => removeArc(arc));
+    [arc1, arc2].forEach(arc => addArc(arc));
+    removeCrossing(crossing);
 }
-exports.unlink = unlink;
+exports.uncross = uncross;
+function reorient(knot, seed, callbackFns) {
+    const { flipArc, addArc, removeArc } = callbackFns;
+    const arcsToRemove = [];
+    const arcsToAdd = [];
+    let currentArc = seed;
+    let flipped = false;
+    do {
+        if (currentArc.end == null)
+            break;
+        const nextArcs = knot.arcs.filter(arc => arc !== currentArc &&
+            [arc.begin, arc.end].indexOf(flipped ? currentArc.begin : currentArc.end) != -1);
+        if (nextArcs.length == 0) {
+            throw new Error("invalid knot: not enough (1) arcs on upper strand of crossing");
+        }
+        if (nextArcs.length > 1) {
+            throw new Error("invalid knot: too many (3+) arcs on upper strand of crossing");
+        }
+        const nextArc = nextArcs[0];
+        if (nextArc.end == (flipped ? currentArc.begin : currentArc.end)) {
+            arcsToRemove.push(nextArc);
+            arcsToAdd.push(flipArc(nextArc));
+            flipped = true;
+        }
+        else {
+            flipped = false;
+        }
+        currentArc = nextArc;
+    } while (currentArc !== seed);
+    arcsToRemove.forEach(removeArc);
+    arcsToAdd.forEach(addArc);
+}
+exports.reorient = reorient;
 class Anchor {
     constructor(crossing, strand) {
         this.crossing = crossing;
@@ -236,6 +274,10 @@ class Knot {
         this.crossings = crossings;
         this.arcs = arcs;
         this.mergeArcs = this.mergeArcs.bind(this);
+        this.flipArc = this.flipArc.bind(this);
+        this.removeCrossing = this.removeCrossing.bind(this);
+        this.addArc = this.addArc.bind(this);
+        this.removeArc = this.removeArc.bind(this);
     }
     copy(crossings, arcs) {
         return new Knot(crossings, arcs);
@@ -244,6 +286,9 @@ class Knot {
         return map(this, crossing => crossing.copy(), (anchor, crossing) => anchor.copy(crossing), (arc, begin, end) => arc.copy(begin, end), (knot, crossings, arcs) => knot.copy(crossings, arcs));
     }
     mergeArcs(arc1, arc2, crossing) {
+        if (arc1 == arc2) {
+            return new Arc(null, null); // used to denote an unlink component
+        }
         if (arc1.end.crossing == crossing && arc2.begin.crossing == crossing) {
             return new Arc(arc1.begin, arc2.end);
         }
@@ -258,14 +303,25 @@ class Knot {
         }
         throw new Error("incompatible arcs");
     }
-    unlink(crossing, sign) {
-        return unlink(this, crossing, sign, {
-            mergeArcs: this.mergeArcs,
-            copyCrossing: crossing => crossing.copy(),
-            copyAnchor: (anchor, crossing) => anchor.copy(crossing),
-            copyArc: (arc, begin, end) => arc.copy(begin, end),
-            copyKnot: (knot, crossings, arcs) => knot.copy(crossings, arcs)
-        });
+    flipArc(arc) {
+        return new Arc(arc.end, arc.begin);
+    }
+    removeCrossing(crossing) {
+        if (this.crossings.indexOf(crossing) != -1)
+            this.crossings.splice(this.crossings.indexOf(crossing), 1);
+    }
+    addArc(arc) {
+        this.arcs.push(arc);
+    }
+    removeArc(arc) {
+        if (this.arcs.indexOf(arc) != -1)
+            this.arcs.splice(this.arcs.indexOf(arc), 1);
+    }
+    uncross(crossing, sign) {
+        uncross(this, crossing, sign, this);
+    }
+    reorient(seed) {
+        reorient(this, seed || this.arcs[0], this);
     }
 }
 exports.Knot = Knot;
@@ -329,7 +385,7 @@ class Arc extends PlanarKnot.Arc {
         this.path = path;
     }
     copy(begin, end) {
-        return new Arc(begin, end, this.path);
+        return new Arc(begin, end, this.path.slice());
     }
 }
 exports.Arc = Arc;
@@ -340,23 +396,28 @@ class Knot extends PlanarKnot.Knot {
         this.arcs = arcs;
     }
     copy(crossings, arcs) {
-        return super.copy(crossings, arcs);
+        return new Knot(crossings, arcs);
+    }
+    clone() {
+        return super.clone();
     }
     mergeArcs(arc1, arc2, crossing) {
         const arc3 = super.mergeArcs(arc1, arc2, crossing);
-        const newPath = [
-            ...(arc1.end.crossing == crossing
-                ? arc1.path
-                : arc1.path.slice().reverse()),
-            crossing.location,
-            ...(arc2.begin.crossing == crossing
-                ? arc2.path
-                : arc2.path.slice().reverse())
-        ];
+        const newPath = arc1 == arc2
+            ? [...arc1.path, crossing.location, arc1.path[0]]
+            : [
+                ...(arc1.end.crossing === crossing
+                    ? arc1.path
+                    : arc1.path.slice().reverse()),
+                crossing.location,
+                ...(arc2.begin.crossing === crossing
+                    ? arc2.path
+                    : arc2.path.slice().reverse())
+            ];
         return new Arc(arc3.begin, arc3.end, newPath);
     }
-    unlink(crossing, sign) {
-        return super.unlink(crossing, sign);
+    flipArc(arc) {
+        return new Arc(arc.end, arc.begin, arc.path.slice().reverse());
     }
     static fromPlanarPolyKnot(knot) {
         return PlanarKnot.map(knot, crossing => new Crossing(crossing.location), (anchor, crossing) => crossing[anchor.strand], (arc, begin, end) => new Arc(begin, end, arc.path), (knot, crossings, arcs) => new Knot(crossings, arcs));
@@ -410,6 +471,7 @@ const planar_spring_knot_1 = __webpack_require__(/*! ./layout/planar-spring-knot
 const poly_knot_diagram_1 = __webpack_require__(/*! ./renderers/canvas/poly-knot-diagram */ "./src/renderers/canvas/poly-knot-diagram.ts");
 const lin_1 = __webpack_require__(/*! ./utils/lin */ "./src/utils/lin.ts");
 const planar_poly_knot_3 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
+const planar_knot_1 = __webpack_require__(/*! ./core/planar-knot */ "./src/core/planar-knot.ts");
 const knot = planar_poly_knot_1.trefoil();
 const m = lin_1.dot(lin_1.translate([200, 200]), lin_1.scale(100));
 planar_poly_knot_2.transform(knot, m);
@@ -438,15 +500,20 @@ poly_knot_diagram_1.drawKnot(ctx, springKnot);
 //   ctx.clearRect(0, 0, 400, 400);
 //   drawKnot(ctx, springKnot);
 // }, 100);
+const nextArcFn = planar_knot_1.nextArc;
 const knot2 = planar_poly_knot_3.Knot.fromPlanarPolyKnot(springKnot);
-const crossing = knot2.crossings[1];
-const knot3 = knot2.unlink(crossing, "negative");
+knot2.uncross(knot2.crossings[0], "negative");
+knot2.reorient();
+knot2.uncross(knot2.crossings[0], "positive");
+knot2.reorient();
+knot2.uncross(knot2.crossings[0], "positive");
+knot2.reorient();
 const canvas2 = document.getElementById("test-canvas2");
 const ctx2 = canvas2.getContext("2d");
 ctx.strokeStyle = "#000";
 ctx.lineWidth = 5;
 ctx.lineCap = "round";
-poly_knot_diagram_1.drawKnot(ctx2, knot3);
+poly_knot_diagram_1.drawKnot(ctx2, knot2);
 
 
 /***/ }),
@@ -737,25 +804,28 @@ function drawKnot(ctx, knot, opts) {
     const { gap } = Object.assign({ gap: 20 }, (opts || {}));
     knot.arcs.forEach(arc => {
         const fullPath = [
-            arc.begin.crossing.location,
+            ...(arc.begin ? [arc.begin.crossing.location] : []),
             ...arc.path.filter(
             // filter out points in path that are too close to the endpoints
-            v => (arc.begin.strand == "upper" ||
-                lin_1.dist(v, arc.begin.crossing.location) >= gap) &&
-                (arc.end.strand == "upper" ||
-                    lin_1.dist(v, arc.end.crossing.location) >= gap)),
-            arc.end.crossing.location
+            v => !arc.begin ||
+                !arc.end ||
+                ((arc.begin.strand == "upper" ||
+                    lin_1.dist(v, arc.begin.crossing.location) >= gap) &&
+                    (arc.end.strand == "upper" ||
+                        lin_1.dist(v, arc.end.crossing.location) >= gap))),
+            ...(arc.end ? [arc.end.crossing.location] : [])
         ];
-        const startPoint = arc.begin.strand == "lower"
+        const startPoint = arc.begin && arc.begin.strand == "lower"
             ? lin_1.shiftToward(fullPath[0], fullPath[1], gap)
             : fullPath[0];
-        const endPoint = arc.end.strand == "lower"
+        const endPoint = arc.end && arc.end.strand == "lower"
             ? lin_1.shiftToward(fullPath[fullPath.length - 1], fullPath[fullPath.length - 2], gap)
             : fullPath[fullPath.length - 1];
         const gapPath = [startPoint, ...fullPath.slice(1, -1), endPoint];
         ctx.beginPath();
         utils_1.quadraticBSpline(ctx, gapPath);
         // polyline(ctx, gapPath);
+        // ctx.arc(endPoint[0], endPoint[1], 5, 0, 2 * Math.PI);
         ctx.stroke();
     });
 }
