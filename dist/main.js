@@ -116,6 +116,11 @@ function anchorEquals(anchor1, anchor2) {
     return (anchor1.crossing == anchor2.crossing && anchor1.strand == anchor2.strand);
 }
 exports.anchorEquals = anchorEquals;
+/**
+ * Returns arcs in the order [upper-out, upper-in, lower-out, lower in]
+ * @param knot Knot
+ * @param crossing Crossing within the knot
+ */
 function arcsAtCrossing(knot, crossing) {
     const adjacentArcs = knot.arcs.filter(arc => arc.end.crossing == crossing || arc.begin.crossing == crossing);
     if (adjacentArcs.length != 4) {
@@ -174,24 +179,96 @@ function nextArc(knot, arc) {
     return matches[0];
 }
 exports.nextArc = nextArc;
+function unlink(knot, crossing, sign, callbackFns) {
+    const { mergeArcs, copyCrossing, copyAnchor, copyArc, copyKnot } = callbackFns;
+    const [upperOut, upperIn, lowerOut, lowerIn] = arcsAtCrossing(knot, crossing);
+    const arc1 = sign == "positive"
+        ? mergeArcs(lowerIn, upperOut, crossing)
+        : mergeArcs(lowerIn, upperIn, crossing);
+    const arc2 = sign == "positive"
+        ? mergeArcs(upperIn, lowerOut, crossing)
+        : mergeArcs(upperOut, lowerOut, crossing);
+    const arcsToRemove = [upperOut, upperIn, lowerOut, lowerIn];
+    const newArcs = [
+        ...knot.arcs.filter(arc => arcsToRemove.indexOf(arc) == -1),
+        arc1,
+        arc2
+    ];
+    const newCrossings = knot.crossings.filter(c => c !== crossing);
+    return map({ crossings: newCrossings, arcs: newArcs }, copyCrossing, copyAnchor, copyArc, (_, crossings, arcs) => copyKnot(knot, crossings, arcs));
+}
+exports.unlink = unlink;
+class Anchor {
+    constructor(crossing, strand) {
+        this.crossing = crossing;
+        this.strand = strand;
+    }
+    copy(crossing) {
+        return crossing[this.strand];
+    }
+}
+exports.Anchor = Anchor;
 /**
  * A crossing with references to anchors
  */
 class Crossing {
     constructor() {
-        const lower = {
-            strand: "lower",
-            crossing: this
-        };
-        const upper = {
-            strand: "upper",
-            crossing: this
-        };
-        this.lower = lower;
-        this.upper = upper;
+        this.lower = new Anchor(this, "lower");
+        this.upper = new Anchor(this, "upper");
+    }
+    copy() {
+        return new Crossing();
     }
 }
 exports.Crossing = Crossing;
+class Arc {
+    constructor(begin, end) {
+        this.begin = begin;
+        this.end = end;
+    }
+    copy(begin, end) {
+        return new Arc(begin, end);
+    }
+}
+exports.Arc = Arc;
+class Knot {
+    constructor(crossings, arcs) {
+        this.crossings = crossings;
+        this.arcs = arcs;
+        this.mergeArcs = this.mergeArcs.bind(this);
+    }
+    copy(crossings, arcs) {
+        return new Knot(crossings, arcs);
+    }
+    clone() {
+        return map(this, crossing => crossing.copy(), (anchor, crossing) => anchor.copy(crossing), (arc, begin, end) => arc.copy(begin, end), (knot, crossings, arcs) => knot.copy(crossings, arcs));
+    }
+    mergeArcs(arc1, arc2, crossing) {
+        if (arc1.end.crossing == crossing && arc2.begin.crossing == crossing) {
+            return new Arc(arc1.begin, arc2.end);
+        }
+        if (arc1.begin.crossing == crossing && arc2.end.crossing == crossing) {
+            return new Arc(arc1.end, arc2.begin);
+        }
+        if (arc1.end.crossing == crossing && arc2.end.crossing == crossing) {
+            return new Arc(arc1.begin, arc2.begin);
+        }
+        if (arc1.begin.crossing == crossing && arc2.begin.crossing == crossing) {
+            return new Arc(arc1.end, arc2.end);
+        }
+        throw new Error("incompatible arcs");
+    }
+    unlink(crossing, sign) {
+        return unlink(this, crossing, sign, {
+            mergeArcs: this.mergeArcs,
+            copyCrossing: crossing => crossing.copy(),
+            copyAnchor: (anchor, crossing) => anchor.copy(crossing),
+            copyArc: (arc, begin, end) => arc.copy(begin, end),
+            copyKnot: (knot, crossings, arcs) => knot.copy(crossings, arcs)
+        });
+    }
+}
+exports.Knot = Knot;
 
 
 /***/ }),
@@ -228,8 +305,64 @@ class Crossing extends PlanarKnot.Crossing {
         super();
         this.location = location;
     }
+    copy() {
+        return new Crossing(this.location);
+    }
 }
 exports.Crossing = Crossing;
+class Anchor extends PlanarKnot.Anchor {
+    constructor(crossing, strand) {
+        super(crossing, strand);
+        this.crossing = crossing;
+        this.strand = strand;
+    }
+    copy(crossing) {
+        return super.copy(crossing);
+    }
+}
+exports.Anchor = Anchor;
+class Arc extends PlanarKnot.Arc {
+    constructor(begin, end, path) {
+        super(begin, end);
+        this.begin = begin;
+        this.end = end;
+        this.path = path;
+    }
+    copy(begin, end) {
+        return new Arc(begin, end, this.path);
+    }
+}
+exports.Arc = Arc;
+class Knot extends PlanarKnot.Knot {
+    constructor(crossings, arcs) {
+        super(crossings, arcs);
+        this.crossings = crossings;
+        this.arcs = arcs;
+    }
+    copy(crossings, arcs) {
+        return super.copy(crossings, arcs);
+    }
+    mergeArcs(arc1, arc2, crossing) {
+        const arc3 = super.mergeArcs(arc1, arc2, crossing);
+        const newPath = [
+            ...(arc1.end.crossing == crossing
+                ? arc1.path
+                : arc1.path.slice().reverse()),
+            crossing.location,
+            ...(arc2.begin.crossing == crossing
+                ? arc2.path
+                : arc2.path.slice().reverse())
+        ];
+        return new Arc(arc3.begin, arc3.end, newPath);
+    }
+    unlink(crossing, sign) {
+        return super.unlink(crossing, sign);
+    }
+    static fromPlanarPolyKnot(knot) {
+        return PlanarKnot.map(knot, crossing => new Crossing(crossing.location), (anchor, crossing) => crossing[anchor.strand], (arc, begin, end) => new Arc(begin, end, arc.path), (knot, crossings, arcs) => new Knot(crossings, arcs));
+    }
+}
+exports.Knot = Knot;
 exports.trefoil = () => {
     const crossings = [
         new Crossing([0, 1]),
@@ -258,10 +391,70 @@ exports.trefoil = () => {
 
 /***/ }),
 
-/***/ "./src/core/planar-spring-knot.ts":
-/*!****************************************!*\
-  !*** ./src/core/planar-spring-knot.ts ***!
-  \****************************************/
+/***/ "./src/index.tsx":
+/*!***********************!*\
+  !*** ./src/index.tsx ***!
+  \***********************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+const React = __webpack_require__(/*! react */ "react");
+const ReactDOM = __webpack_require__(/*! react-dom */ "react-dom");
+const poly_knot_diagram_canvas_1 = __webpack_require__(/*! ./renderers/react/poly-knot-diagram-canvas */ "./src/renderers/react/poly-knot-diagram-canvas.tsx");
+const planar_poly_knot_1 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
+const planar_poly_knot_2 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
+const planar_spring_knot_1 = __webpack_require__(/*! ./layout/planar-spring-knot */ "./src/layout/planar-spring-knot.ts");
+const poly_knot_diagram_1 = __webpack_require__(/*! ./renderers/canvas/poly-knot-diagram */ "./src/renderers/canvas/poly-knot-diagram.ts");
+const lin_1 = __webpack_require__(/*! ./utils/lin */ "./src/utils/lin.ts");
+const planar_poly_knot_3 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
+const knot = planar_poly_knot_1.trefoil();
+const m = lin_1.dot(lin_1.translate([200, 200]), lin_1.scale(100));
+planar_poly_knot_2.transform(knot, m);
+ReactDOM.render(React.createElement(poly_knot_diagram_canvas_1.PolyKnotDiagramCanvas, { knot: knot, width: 400, height: 400 }), document.getElementById("react-root"));
+const springKnot = planar_spring_knot_1.PlanarSpringKnot.fromPlanarPolyKnot(knot, 5);
+console.log(springKnot);
+// springKnot.initialize();
+const canvas = document.getElementById("test-canvas");
+const ctx = canvas.getContext("2d");
+ctx.strokeStyle = "#000";
+ctx.lineWidth = 5;
+ctx.lineCap = "round";
+springKnot.localOptimize();
+poly_knot_diagram_1.drawKnot(ctx, springKnot);
+// const interval = setInterval(() => {
+//   const energy = springKnot.energy();
+//   springKnot.pushState();
+//   springKnot.perturb(10);
+//   springKnot.localOptimize();
+//   const newEnergy = springKnot.energy();
+//   if (newEnergy > energy) springKnot.popState();
+//   else {
+//     springKnot.discardState();
+//     console.log(energy);
+//   }
+//   ctx.clearRect(0, 0, 400, 400);
+//   drawKnot(ctx, springKnot);
+// }, 100);
+const knot2 = planar_poly_knot_3.Knot.fromPlanarPolyKnot(springKnot);
+const crossing = knot2.crossings[1];
+const knot3 = knot2.unlink(crossing, "negative");
+const canvas2 = document.getElementById("test-canvas2");
+const ctx2 = canvas2.getContext("2d");
+ctx.strokeStyle = "#000";
+ctx.lineWidth = 5;
+ctx.lineCap = "round";
+poly_knot_diagram_1.drawKnot(ctx2, knot3);
+
+
+/***/ }),
+
+/***/ "./src/layout/planar-spring-knot.ts":
+/*!******************************************!*\
+  !*** ./src/layout/planar-spring-knot.ts ***!
+  \******************************************/
 /*! no static exports found */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -269,7 +462,7 @@ exports.trefoil = () => {
 
 Object.defineProperty(exports, "__esModule", { value: true });
 const lin_1 = __webpack_require__(/*! ../utils/lin */ "./src/utils/lin.ts");
-const planar_knot_1 = __webpack_require__(/*! ./planar-knot */ "./src/core/planar-knot.ts");
+const planar_knot_1 = __webpack_require__(/*! ../core/planar-knot */ "./src/core/planar-knot.ts");
 const utils_1 = __webpack_require__(/*! ../utils/utils */ "./src/utils/utils.ts");
 class Node {
     constructor(parent) {
@@ -524,78 +717,6 @@ class PlanarSpringKnot {
     }
 }
 exports.PlanarSpringKnot = PlanarSpringKnot;
-
-
-/***/ }),
-
-/***/ "./src/index.tsx":
-/*!***********************!*\
-  !*** ./src/index.tsx ***!
-  \***********************/
-/*! no static exports found */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", { value: true });
-const React = __webpack_require__(/*! react */ "react");
-const ReactDOM = __webpack_require__(/*! react-dom */ "react-dom");
-const poly_knot_diagram_canvas_1 = __webpack_require__(/*! ./renderers/react/poly-knot-diagram-canvas */ "./src/renderers/react/poly-knot-diagram-canvas.tsx");
-const planar_poly_knot_1 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
-const planar_poly_knot_2 = __webpack_require__(/*! ./core/planar-poly-knot */ "./src/core/planar-poly-knot.ts");
-const planar_spring_knot_1 = __webpack_require__(/*! ./core/planar-spring-knot */ "./src/core/planar-spring-knot.ts");
-const poly_knot_diagram_1 = __webpack_require__(/*! ./renderers/canvas/poly-knot-diagram */ "./src/renderers/canvas/poly-knot-diagram.ts");
-const lin_1 = __webpack_require__(/*! ./utils/lin */ "./src/utils/lin.ts");
-const knot = planar_poly_knot_1.trefoil();
-const m = lin_1.dot(lin_1.translate([200, 200]), lin_1.scale(100));
-planar_poly_knot_2.transform(knot, m);
-ReactDOM.render(React.createElement(poly_knot_diagram_canvas_1.PolyKnotDiagramCanvas, { knot: knot, width: 400, height: 400 }), document.getElementById("react-root"));
-const springKnot = planar_spring_knot_1.PlanarSpringKnot.fromPlanarPolyKnot(knot, 5);
-console.log(springKnot);
-// springKnot.initialize();
-const canvas = document.getElementById("test-canvas");
-const ctx = canvas.getContext("2d");
-ctx.strokeStyle = "#000";
-ctx.lineWidth = 5;
-ctx.lineCap = "round";
-springKnot.localOptimize();
-// drawKnot(ctx, springKnot);
-// const interval = setInterval(() => {
-//   const energy = springKnot.energy();
-//   springKnot.pushState();
-//   springKnot.perturb(10);
-//   springKnot.localOptimize();
-//   const newEnergy = springKnot.energy();
-//   if (newEnergy > energy) springKnot.popState();
-//   else {
-//     springKnot.discardState();
-//     console.log(energy);
-//   }
-//   ctx.clearRect(0, 0, 400, 400);
-//   drawKnot(ctx, springKnot);
-// }, 100);
-const knot2 = springKnot;
-// const knot2 = trefoil();
-// transform(knot2, m);
-// const crossing = knot2.crossings[0];
-// const [upperOut, upperIn, lowerOut, lowerIn] = arcsAtCrossing(knot2, crossing);
-// const arc1: Arc = {
-//   begin: lowerIn.begin,
-//   end: upperOut.end,
-//   path: [...lowerIn.path, crossing.location, ...upperOut.path]
-// };
-// const arc2: Arc = {
-//   begin: upperIn.begin,
-//   end: lowerOut.end,
-//   path: [...upperIn.path, crossing.location, ...lowerOut.path]
-// };
-// knot2.arcs.splice(knot2.arcs.indexOf(upperOut), 1);
-// knot2.arcs.splice(knot2.arcs.indexOf(upperIn), 1);
-// knot2.arcs.splice(knot2.arcs.indexOf(lowerOut), 1);
-// knot2.arcs.splice(knot2.arcs.indexOf(lowerIn), 1);
-// knot2.arcs.push(arc1, arc2);
-// knot2.crossings.splice(knot2.crossings.indexOf(crossing), 1);
-poly_knot_diagram_1.drawKnot(ctx, knot2);
 
 
 /***/ }),

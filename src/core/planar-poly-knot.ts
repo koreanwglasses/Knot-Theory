@@ -29,9 +29,84 @@ export function transform<
   );
 }
 
-export class Crossing extends PlanarKnot.Crossing implements D.Crossing {
-  constructor(public location: Vector2) {
+export class Crossing extends PlanarKnot.Crossing implements G.Crossing {
+  readonly lower: Anchor;
+  readonly upper: Anchor;
+  constructor(readonly location: Vector2) {
     super();
+  }
+
+  copy(): Crossing {
+    return new Crossing(this.location);
+  }
+}
+
+export class Anchor extends PlanarKnot.Anchor implements G.Anchor<Crossing> {
+  constructor(readonly crossing: Crossing, readonly strand: "lower" | "upper") {
+    super(crossing, strand);
+  }
+
+  copy(crossing: Crossing): Anchor {
+    return super.copy(crossing) as Anchor;
+  }
+}
+
+export class Arc extends PlanarKnot.Arc implements G.Arc<Crossing, Anchor> {
+  constructor(
+    readonly begin: Anchor,
+    readonly end: Anchor,
+    readonly path: Vector2[]
+  ) {
+    super(begin, end);
+  }
+
+  copy(begin: Anchor, end: Anchor): Arc {
+    return new Arc(begin, end, this.path);
+  }
+}
+
+export class Knot extends PlanarKnot.Knot
+  implements G.Knot<Crossing, Anchor, Arc> {
+  constructor(readonly crossings: Crossing[], readonly arcs: Arc[]) {
+    super(crossings, arcs);
+  }
+
+  copy(crossings: Crossing[], arcs: Arc[]): Knot {
+    return super.copy(crossings, arcs) as Knot;
+  }
+
+  mergeArcs(arc1: Arc, arc2: Arc, crossing: Crossing): Arc {
+    const arc3 = super.mergeArcs(arc1, arc2, crossing) as Arc;
+
+    const newPath = [
+      ...(arc1.end.crossing == crossing
+        ? arc1.path
+        : arc1.path.slice().reverse()),
+      crossing.location,
+      ...(arc2.begin.crossing == crossing
+        ? arc2.path
+        : arc2.path.slice().reverse())
+    ];
+
+    return new Arc(arc3.begin, arc3.end, newPath);
+  }
+
+  unlink(crossing: Crossing, sign: "positive" | "negative"): Knot {
+    return super.unlink(crossing, sign) as Knot;
+  }
+
+  static fromPlanarPolyKnot<
+    C extends G.Crossing,
+    N extends G.Anchor<C>,
+    R extends G.Arc<C, N>
+  >(knot: G.Knot<C, N, R>): Knot {
+    return PlanarKnot.map(
+      knot,
+      crossing => new Crossing(crossing.location),
+      (anchor, crossing) => crossing[anchor.strand],
+      (arc, begin: Anchor, end: Anchor) => new Arc(begin, end, arc.path),
+      (knot, crossings, arcs) => new Knot(crossings, arcs)
+    );
   }
 }
 

@@ -26,6 +26,34 @@ export function map<
   knotFn: (knot: K1, crossings: CrossingType<K2>[], arcs: ArcType<K2>[]) => K2
 ): K2;
 export function map<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(
+  knot: K,
+  crossingFn: (crossing: C) => C,
+  anchorFn: (anchor: N, crossing: C) => N,
+  arcFn: (arc: R, begin: N, end: N) => R,
+  knotFn: (knot: K, crossings: C[], arcs: R[]) => K
+): K;
+export function map<
+  C1,
+  C2,
+  N1 extends G.Anchor<C1>,
+  N2 extends G.Anchor<C2>,
+  R1 extends G.Arc<C1, N1>,
+  R2 extends G.Arc<C2, N2>,
+  K1 extends G.Knot<C1, N1, R1>,
+  K2 extends G.Knot<C2, N2, R2>
+>(
+  knot: K1,
+  crossingFn: (crossing: C1) => C2,
+  anchorFn: (anchor: N1, crossing: C2) => N2,
+  arcFn: (arc: R1, begin: N2, end: N2) => R2,
+  knotFn: (knot: K1, crossings: C2[], arcs: R2[]) => K2
+): K2;
+export function map<
   C1,
   C2,
   N1 extends G.Anchor<C1>,
@@ -76,13 +104,7 @@ export function arcsAtCrossing<
   N extends G.Anchor<C>,
   R extends G.Arc<C, N>,
   K extends G.Knot<C, N, R>
->(knot: K, crossing: CrossingType<K>): ArcType<K>[];
-export function arcsAtCrossing<
-  C,
-  N extends G.Anchor<C>,
-  R extends G.Arc<C, N>,
-  K extends G.Knot<C, N, R>
->(knot: K, crossing: CrossingType<K>): R[] {
+>(knot: K, crossing: C): R[] {
   const adjacentArcs = knot.arcs.filter(
     arc => arc.end.crossing == crossing || arc.begin.crossing == crossing
   );
@@ -184,31 +206,69 @@ export function nextArc<
   return matches[0];
 }
 
-export function unlink<C, N extends G.Anchor<C>, R extends G.Arc<C, N>>(
-  knot: G.Knot<C, N, R>,
+export function unlink<
+  C,
+  N extends G.Anchor<C>,
+  R extends G.Arc<C, N>,
+  K extends G.Knot<C, N, R>
+>(
+  knot: K,
   crossing: C,
   sign: "positive" | "negative",
-  mergeArcs: (arc1: R, arc2: R) => R
-): void {
+  callbackFns: {
+    mergeArcs: (arc1: R, arc2: R, crossing: C) => R;
+    copyCrossing: (crossing: C) => C;
+    copyAnchor: (anchor: N, crossing: C) => N;
+    copyArc: (arc: R, begin: N, end: N) => R;
+    copyKnot: (knot: K, crossings: C[], arcs: R[]) => K;
+  }
+): K {
+  const {
+    mergeArcs,
+    copyCrossing,
+    copyAnchor,
+    copyArc,
+    copyKnot
+  } = callbackFns;
+
   const [upperOut, upperIn, lowerOut, lowerIn] = arcsAtCrossing(knot, crossing);
 
   const arc1 =
     sign == "positive"
-      ? mergeArcs(lowerIn, upperOut)
-      : mergeArcs(lowerIn, upperIn);
+      ? mergeArcs(lowerIn, upperOut, crossing)
+      : mergeArcs(lowerIn, upperIn, crossing);
   const arc2 =
     sign == "positive"
-      ? mergeArcs(upperIn, lowerOut)
-      : mergeArcs(lowerOut, upperIn);
+      ? mergeArcs(upperIn, lowerOut, crossing)
+      : mergeArcs(upperOut, lowerOut, crossing);
 
-  knot.arcs.splice(knot.arcs.indexOf(upperOut), 1);
-  knot.arcs.splice(knot.arcs.indexOf(upperIn), 1);
-  knot.arcs.splice(knot.arcs.indexOf(lowerOut), 1);
-  knot.arcs.splice(knot.arcs.indexOf(lowerIn), 1);
+  const arcsToRemove = [upperOut, upperIn, lowerOut, lowerIn];
 
-  knot.arcs.push(arc1, arc2);
+  const newArcs = [
+    ...knot.arcs.filter(arc => arcsToRemove.indexOf(arc) == -1),
+    arc1,
+    arc2
+  ];
+  const newCrossings = knot.crossings.filter(c => c !== crossing);
 
-  knot.crossings.splice(knot.crossings.indexOf(crossing), 1);
+  return map<C, C, N, N, R, R, G.Knot<C, N, R>, K>(
+    { crossings: newCrossings, arcs: newArcs },
+    copyCrossing,
+    copyAnchor,
+    copyArc,
+    (_, crossings, arcs) => copyKnot(knot, crossings, arcs)
+  );
+}
+
+export class Anchor implements G.Anchor<Crossing> {
+  constructor(
+    readonly crossing: Crossing,
+    readonly strand: "upper" | "lower"
+  ) {}
+
+  copy(crossing: Crossing): Anchor {
+    return crossing[this.strand];
+  }
 }
 
 /**
@@ -218,23 +278,73 @@ export class Crossing {
   /**
    * Anchor to the upper strand at this crossing
    */
-  readonly lower: G.Anchor<this>;
+  readonly lower: Anchor;
 
   /**
    * Anchor to the lower strand at this crossing
    */
-  readonly upper: G.Anchor<this>;
+  readonly upper: Anchor;
 
   constructor() {
-    const lower: G.Anchor<this> = {
-      strand: "lower",
-      crossing: this
-    };
-    const upper: G.Anchor<this> = {
-      strand: "upper",
-      crossing: this
-    };
-    this.lower = lower;
-    this.upper = upper;
+    this.lower = new Anchor(this, "lower");
+    this.upper = new Anchor(this, "upper");
+  }
+
+  copy(): Crossing {
+    return new Crossing();
+  }
+}
+
+export class Arc implements G.Arc<Crossing, Anchor> {
+  constructor(readonly begin: Anchor, readonly end: Anchor) {}
+
+  copy(begin: Anchor, end: Anchor): Arc {
+    return new Arc(begin, end);
+  }
+}
+
+export class Knot implements G.Knot<Crossing, Anchor, Arc> {
+  constructor(readonly crossings: Crossing[], readonly arcs: Arc[]) {
+    this.mergeArcs = this.mergeArcs.bind(this);
+  }
+
+  copy(crossings: Crossing[], arcs: Arc[]): Knot {
+    return new Knot(crossings, arcs);
+  }
+
+  clone(): Knot {
+    return map<Crossing, Anchor, Arc, Knot>(
+      this,
+      crossing => crossing.copy(),
+      (anchor, crossing) => anchor.copy(crossing),
+      (arc, begin, end) => arc.copy(begin, end),
+      (knot, crossings, arcs) => knot.copy(crossings, arcs)
+    );
+  }
+
+  mergeArcs(arc1: Arc, arc2: Arc, crossing: Crossing): Arc {
+    if (arc1.end.crossing == crossing && arc2.begin.crossing == crossing) {
+      return new Arc(arc1.begin, arc2.end);
+    }
+    if (arc1.begin.crossing == crossing && arc2.end.crossing == crossing) {
+      return new Arc(arc1.end, arc2.begin);
+    }
+    if (arc1.end.crossing == crossing && arc2.end.crossing == crossing) {
+      return new Arc(arc1.begin, arc2.begin);
+    }
+    if (arc1.begin.crossing == crossing && arc2.begin.crossing == crossing) {
+      return new Arc(arc1.end, arc2.end);
+    }
+    throw new Error("incompatible arcs");
+  }
+
+  unlink(crossing: Crossing, sign: "positive" | "negative"): Knot {
+    return unlink<Crossing, Anchor, Arc, Knot>(this, crossing, sign, {
+      mergeArcs: this.mergeArcs,
+      copyCrossing: crossing => crossing.copy(),
+      copyAnchor: (anchor, crossing) => anchor.copy(crossing),
+      copyArc: (arc, begin, end) => arc.copy(begin, end),
+      copyKnot: (knot, crossings, arcs) => knot.copy(crossings, arcs)
+    });
   }
 }
