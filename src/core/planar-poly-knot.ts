@@ -91,8 +91,8 @@ export class Knot extends PlanarKnot.Knot
     return new Arc(arc3.begin, arc3.end, newPath);
   }
 
-  unlink(crossing: Crossing, sign: "positive" | "negative"): Knot {
-    return super.unlink(crossing, sign) as Knot;
+  uncross(crossing: Crossing, sign: "positive" | "negative"): Knot {
+    return super.uncross(crossing, sign) as Knot;
   }
 
   static fromPlanarPolyKnot<

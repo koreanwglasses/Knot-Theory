@@ -206,7 +206,7 @@ export function nextArc<
   return matches[0];
 }
 
-export function unlink<
+export function uncross<
   C,
   N extends G.Anchor<C>,
   R extends G.Arc<C, N>,
@@ -338,8 +338,8 @@ export class Knot implements G.Knot<Crossing, Anchor, Arc> {
     throw new Error("incompatible arcs");
   }
 
-  unlink(crossing: Crossing, sign: "positive" | "negative"): Knot {
-    return unlink<Crossing, Anchor, Arc, Knot>(this, crossing, sign, {
+  uncross(crossing: Crossing, sign: "positive" | "negative"): Knot {
+    return uncross<Crossing, Anchor, Arc, Knot>(this, crossing, sign, {
       mergeArcs: this.mergeArcs,
       copyCrossing: crossing => crossing.copy(),
       copyAnchor: (anchor, crossing) => anchor.copy(crossing),
